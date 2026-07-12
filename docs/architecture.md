@@ -90,6 +90,12 @@ domain models and repositories that do not depend on FastAPI or source-specific
 contract structures. PostgreSQL is the system of record for resources, security
 state, locks, scenarios, and tasks.
 
+Authentication secrets use salted scrypt hashes. Session tickets are signed and
+expiring; mutation requests use ticket-bound CSRF tokens. API-token privileges
+are intersected with their owning principal's effective propagated ACLs, so a
+token cannot escalate its owner. Logs redact recognized ticket, password, and
+token representations before emission.
+
 The API layer is an adapter. It authenticates, authorizes, validates against the
 selected contract, dispatches to a semantic handler, and renders a
 version-compatible response. A route without a semantic handler is explicitly

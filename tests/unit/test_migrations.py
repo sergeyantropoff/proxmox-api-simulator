@@ -17,7 +17,8 @@ def test_load_migrations_is_ordered_and_checksummed(tmp_path: Path) -> None:
 
 
 def test_repository_migration_defines_required_planes() -> None:
-    migration = load_migrations()[0]
+    migrations = load_migrations()
+    migration = migrations[0]
 
     for table in (
         "contract_snapshots",
@@ -30,3 +31,5 @@ def test_repository_migration_defines_required_planes() -> None:
         "audit_events",
     ):
         assert f"CREATE TABLE {table}" in migration.sql
+    assert "CREATE TABLE realms" in migrations[1].sql
+    assert "CREATE TABLE api_tokens" in migrations[1].sql
