@@ -97,6 +97,12 @@ expired work to be reclaimed after process failure. Lifespan owns a bounded set
 of asyncio workers and waits for orderly shutdown; PostgreSQL remains the queue
 and source of truth across replicas.
 
+Simulation durations use injected real, accelerated, or manually advanced
+clocks. VM operations are explicit state-machine transitions, and seeded fault
+rules evaluate deterministically. Worker leases are intentionally excluded from
+virtual time: they use PostgreSQL wall time and process monotonic sleeps so a
+paused or accelerated scenario cannot invalidate distributed-worker safety.
+
 Authentication secrets use salted scrypt hashes. Session tickets are signed and
 expiring; mutation requests use ticket-bound CSRF tokens. API-token privileges
 are intersected with their owning principal's effective propagated ACLs, so a
