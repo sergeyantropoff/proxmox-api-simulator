@@ -40,6 +40,15 @@ reject private address resolution, unsafe redirects, oversized responses, and
 unbounded retries. Imported revisions are addressed by their normalized
 snapshot checksum and are never overwritten.
 
+Normalized snapshots can be compared in text, JSON, Markdown, or HTML. The diff
+command exits with status 1 when it finds a breaking change, making it suitable
+for CI policy checks:
+
+```bash
+.venv/bin/proxmox-api-contract diff old-snapshot.json new-snapshot.json \
+  --format markdown
+```
+
 See [the architecture](docs/architecture.md) for component boundaries and
 durability decisions. Commands for not-yet-implemented milestones intentionally
 return a non-zero status instead of pretending to succeed.
