@@ -110,6 +110,22 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     assert wait_task(proxmox, update_upid)["exitstatus"] == "OK"
     assert proxmox.nodes("pve1").qemu("150").config.get()["name"] == "async-update"
 
+    snapshots = proxmox.nodes("pve1").qemu("150").snapshot
+    snapshot_upid = snapshots.post(snapname="baseline", description="before change")
+    assert wait_task(proxmox, snapshot_upid)["exitstatus"] == "OK"
+    assert any(item["name"] == "baseline" for item in snapshots.get())
+    baseline = snapshots("baseline")
+    assert baseline.get()["description"] == "before change"
+    assert baseline.config.put(description="stable baseline") is None
+    assert baseline.config.get()["description"] == "stable baseline"
+    assert proxmox.nodes("pve1").qemu("150").config.put(name="after-snapshot") is None
+    rollback_upid = baseline.rollback.post()
+    assert wait_task(proxmox, rollback_upid)["exitstatus"] == "OK"
+    assert proxmox.nodes("pve1").qemu("150").config.get()["name"] == "async-update"
+    snapshot_delete_upid = baseline.delete()
+    assert wait_task(proxmox, snapshot_delete_upid)["exitstatus"] == "OK"
+    assert not snapshots.get()
+
     delete_upid = proxmox.nodes("pve1").qemu("150").delete()
     assert wait_task(proxmox, delete_upid)["exitstatus"] == "OK"
     with pytest.raises(ResourceException) as deleted_vm:

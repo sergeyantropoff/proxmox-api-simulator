@@ -104,6 +104,48 @@
       "verb": "POST",
       "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
       "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_transitions.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/snapshot",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/snapshot",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}",
+      "verb": "DELETE",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/config",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/config",
+      "verb": "PUT",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_task.py"]
     }
   ]
 }
