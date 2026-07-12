@@ -8,7 +8,16 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.contracts.diff import (
+    compare_snapshots,
+    has_breaking_changes,
+    render_html,
+    render_json,
+    render_markdown,
+    render_text,
+)
 from app.contracts.importer import RemoteSourceImporter
+from app.contracts.model import Snapshot
 from app.contracts.normalize import normalize_snapshot
 from app.contracts.source import ApiViewerParser, LocalFileImporter, SourceImporter
 from app.contracts.store import RevisionStore
@@ -28,6 +37,10 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("list")
     show = commands.add_parser("show")
     show.add_argument("revision")
+    diff = commands.add_parser("diff")
+    diff.add_argument("before", type=Path)
+    diff.add_argument("after", type=Path)
+    diff.add_argument("--format", choices=("text", "json", "markdown", "html"), default="text")
     return root
 
 
@@ -40,6 +53,18 @@ async def run(arguments: argparse.Namespace) -> int:
     if arguments.command == "show":
         print(json.dumps(store.manifest(arguments.revision).model_dump(mode="json"), indent=2))
         return 0
+    if arguments.command == "diff":
+        before = Snapshot.model_validate_json(arguments.before.read_bytes())
+        after = Snapshot.model_validate_json(arguments.after.read_bytes())
+        changes = compare_snapshots(before, after)
+        renderers = {
+            "text": render_text,
+            "json": render_json,
+            "markdown": render_markdown,
+            "html": render_html,
+        }
+        print(renderers[arguments.format](changes))
+        return 1 if has_breaking_changes(changes) else 0
     if arguments.command == "validate":
         parsed = ApiViewerParser().parse(arguments.file.read_bytes())
         print(json.dumps({"nodes": len(parsed.nodes), "warnings": len(parsed.warnings)}))

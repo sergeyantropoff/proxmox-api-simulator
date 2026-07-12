@@ -73,7 +73,7 @@ api-import: ## Import an API snapshot
 	$(BIN)/proxmox-api-contract import $(ARGS)
 
 api-diff: ## Compare API snapshots
-	@echo "API diff is scheduled for milestone B5" >&2; exit 2
+	$(BIN)/proxmox-api-contract diff $(ARGS)
 
 seed: ## Seed simulation data
 	@echo "Database seed is scheduled for milestone D2" >&2; exit 2
