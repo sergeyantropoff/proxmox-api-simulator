@@ -236,6 +236,92 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
     async def resume(request: Request, inputs: dict[str, Any]) -> str:
         return await mutate("resume", request, inputs)
 
+    async def snapshot_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        values = _values(inputs)
+        resource = await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
+        rows = await _database(request).pool.fetch(
+            """SELECT name, parent_name, description, created_at FROM snapshots
+            WHERE resource_id=$1 ORDER BY created_at, name""",
+            resource["id"],
+        )
+        return [
+            {
+                "name": row["name"],
+                "parent": row["parent_name"],
+                "description": row["description"] or "",
+                "snaptime": int(row["created_at"].timestamp()),
+            }
+            for row in rows
+        ]
+
+    async def snapshot_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        values = _values(inputs)
+        row = await _snapshot(request, values)
+        state = _state(row["state"])
+        return {
+            "name": row["name"],
+            "parent": row["parent_name"],
+            "description": row["description"] or "",
+            "snaptime": int(row["created_at"].timestamp()),
+            **state,
+        }
+
+    async def snapshot_config(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        row = await _snapshot(request, _values(inputs))
+        return {"description": row["description"] or "", **_state(row["state"])}
+
+    async def snapshot_update(request: Request, inputs: dict[str, Any]) -> None:
+        values = _values(inputs)
+        row = await _snapshot(request, values)
+        await _database(request).pool.execute(
+            "UPDATE snapshots SET description=$2 WHERE id=$1",
+            row["id"],
+            str(values.get("description", "")),
+        )
+
+    async def snapshot_task(operation: str, request: Request, inputs: dict[str, Any]) -> str:
+        values = _values(inputs)
+        node, vmid, snapname = (
+            str(values["node"]),
+            str(values["vmid"]),
+            str(values["snapname"]),
+        )
+        resource = await _qemu_resource(request, node, vmid)
+        if operation == "snapshot-create":
+            exists = await _database(request).pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM snapshots WHERE resource_id=$1 AND name=$2)",
+                resource["id"],
+                snapname,
+            )
+            if exists:
+                raise ApiError(409, "snapshot already exists")
+        else:
+            await _snapshot(request, values)
+        return await _create_task(
+            request,
+            node=node,
+            vmid=vmid,
+            task_type=f"qemu-{operation}",
+            payload={
+                "node": node,
+                "vmid": vmid,
+                "resource_id": str(resource["id"]),
+                "snapname": snapname,
+                "description": str(values.get("description", "")),
+                "vmstate": bool(values.get("vmstate", False)),
+                "start": bool(values.get("start", False)),
+            },
+        )
+
+    async def snapshot_create(request: Request, inputs: dict[str, Any]) -> str:
+        return await snapshot_task("snapshot-create", request, inputs)
+
+    async def snapshot_delete(request: Request, inputs: dict[str, Any]) -> str:
+        return await snapshot_task("snapshot-delete", request, inputs)
+
+    async def snapshot_rollback(request: Request, inputs: dict[str, Any]) -> str:
+        return await snapshot_task("snapshot-rollback", request, inputs)
+
     async def task_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         tasks = await TaskRepository(_database(request).pool).list_for_node(
             str(_values(inputs)["node"])
@@ -283,6 +369,19 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
     registry.register("/nodes/{node}/qemu/{vmid}/status/reset", "POST", reset)
     registry.register("/nodes/{node}/qemu/{vmid}/status/suspend", "POST", suspend)
     registry.register("/nodes/{node}/qemu/{vmid}/status/resume", "POST", resume)
+    registry.register("/nodes/{node}/qemu/{vmid}/snapshot", "GET", snapshot_list)
+    registry.register("/nodes/{node}/qemu/{vmid}/snapshot", "POST", snapshot_create)
+    registry.register("/nodes/{node}/qemu/{vmid}/snapshot/{snapname}", "GET", snapshot_get)
+    registry.register("/nodes/{node}/qemu/{vmid}/snapshot/{snapname}", "DELETE", snapshot_delete)
+    registry.register(
+        "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/config", "GET", snapshot_config
+    )
+    registry.register(
+        "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/config", "PUT", snapshot_update
+    )
+    registry.register(
+        "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback", "POST", snapshot_rollback
+    )
     registry.register("/nodes/{node}/tasks", "GET", task_list)
     registry.register("/nodes/{node}/tasks/{upid}/status", "GET", task_status)
     registry.register("/nodes/{node}/tasks/{upid}/log", "GET", task_log)
@@ -303,6 +402,9 @@ async def _create_task(
         "qemu-create": "qmcreate",
         "qemu-delete": "qmdestroy",
         "qemu-update": "qmconfig",
+        "qemu-snapshot-create": "qmsnapshot",
+        "qemu-snapshot-delete": "qmdelsnapshot",
+        "qemu-snapshot-rollback": "qmrollback",
     }[task_type]
     upid = str(Upid(node, pid, pid, timestamp, worker_type, vmid, str(request.state.principal)))
     try:
@@ -316,3 +418,31 @@ async def _create_task(
     except ConflictError as error:
         raise ApiError(409, str(error)) from error
     return task.upid
+
+
+async def _qemu_resource(request: Request, node: str, vmid: str) -> Any:
+    row = await _database(request).pool.fetchrow(
+        """SELECT r.id, r.state, v.config FROM resources r
+        JOIN nodes n ON n.id=r.node_id
+        JOIN virtual_machines v ON v.resource_id=r.id
+        WHERE n.name=$1 AND r.kind='qemu' AND r.external_id=$2""",
+        node,
+        vmid,
+    )
+    if row is None:
+        raise ApiError(404, "virtual machine does not exist")
+    return row
+
+
+async def _snapshot(request: Request, values: dict[str, Any]) -> Any:
+    row = await _database(request).pool.fetchrow(
+        """SELECT s.* FROM snapshots s
+        JOIN resources r ON r.id=s.resource_id JOIN nodes n ON n.id=r.node_id
+        WHERE n.name=$1 AND r.kind='qemu' AND r.external_id=$2 AND s.name=$3""",
+        str(values["node"]),
+        str(values["vmid"]),
+        str(values["snapname"]),
+    )
+    if row is None:
+        raise ApiError(404, "snapshot does not exist")
+    return row

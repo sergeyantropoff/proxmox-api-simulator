@@ -82,6 +82,12 @@ class CrudConnection:
             return {"id": uuid.uuid4(), "cluster_id": uuid.uuid4()}
         if "JOIN virtual_machines" in sql:
             return {"state": '{"status":"stopped","name":"old"}', "config": '{"name":"old"}'}
+        if "FROM snapshots" in sql:
+            return {
+                "state": (
+                    '{"resource_state":{"status":"stopped","name":"old"},"config":{"name":"old"}}'
+                )
+            }
         return None
 
     async def execute(self, sql: str, *args: object) -> str:
@@ -175,3 +181,39 @@ async def test_qemu_worker_create_update_and_delete_are_persistent() -> None:
     assert any("INSERT INTO resources" in command for command in repository.connection.commands)
     assert any("UPDATE virtual_machines" in command for command in repository.connection.commands)
     assert any("DELETE FROM resources" in command for command in repository.connection.commands)
+
+
+async def test_qemu_worker_snapshot_create_rollback_and_delete_are_persistent() -> None:
+    repository = CrudRepository()
+    handler = qemu_handler(cast(TaskRepository, repository), cast(Clock, ImmediateClock()))
+    resource_id = uuid.uuid4()
+
+    async def run(operation: str, **payload: object) -> dict[str, object]:
+        result = await handler(
+            Task(
+                uuid.uuid4(),
+                f"UPID:{operation}",
+                f"qemu-snapshot-{operation}",
+                "running",
+                {"resource_id": str(resource_id), "snapname": "baseline", **payload},
+                0,
+                False,
+                1,
+            )
+        )
+        assert result is not None
+        return cast(dict[str, object], result)
+
+    assert await run("create", description="stable") == {
+        "snapshot": "baseline",
+        "operation": "create",
+    }
+    assert await run("rollback", start=True) == {
+        "snapshot": "baseline",
+        "operation": "rollback",
+    }
+    assert await run("delete") == {"snapshot": "baseline", "operation": "delete"}
+    commands = repository.connection.commands
+    assert any("INSERT INTO snapshots" in command for command in commands)
+    assert any("UPDATE virtual_machines" in command for command in commands)
+    assert any("DELETE FROM snapshots" in command for command in commands)

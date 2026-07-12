@@ -81,6 +81,11 @@ tests verify root access, inherited `Sys.Audit`/`VM.Audit`, operator power
 management, token privilege intersection, denial, and identical denial for an
 existing and a nonexistent VM when the principal lacks `VM.Audit`.
 
+QEMU snapshots are durable PostgreSQL records. Create, delete, and rollback use
+UPID tasks and the same per-VM lock as other mutations; rollback restores both
+the captured VM configuration and runtime state. Snapshot listing, inspection,
+and description updates are available through the native Proxmox API paths.
+
 Token lifecycle is available at
 `/access/users/{userid}/token[/{tokenid}]`. A generated secret is returned only
 by create or explicit regenerate; only its scrypt hash is stored. List/read never

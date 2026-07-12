@@ -1,6 +1,7 @@
 """Persistent QEMU CRUD semantic handler tests."""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -32,7 +33,23 @@ class QemuPool:
             return True
         if "FROM resources" in sql:
             return self.resource_exists
+        if "FROM snapshots" in sql:
+            return False
         raise AssertionError(sql)
+
+    async def fetch(self, sql: str, *args: object) -> list[dict[str, object]]:
+        del args
+        if "FROM resources" in sql:
+            return [{"vmid": 150, "state": '{"status":"stopped","name":"vm"}'}]
+        assert "FROM snapshots" in sql
+        return [
+            {
+                "name": "baseline",
+                "parent_name": None,
+                "description": "stable",
+                "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+            }
+        ]
 
     async def fetchrow(self, sql: str, *args: object) -> dict[str, object] | None:
         del args
@@ -45,9 +62,22 @@ class QemuPool:
                 "state": '{"name":"old","status":"stopped"}',
                 "config": '{"name":"old"}',
             }
+        if "SELECT r.state, v.config" in sql:
+            return {"state": '{"status":"stopped"}', "config": '{"name":"vm"}'}
         if "SELECT r.id, r.state" in sql:
             status = "running" if self.running else "stopped"
             return {"id": self.resource_id, "state": f'{{"status":"{status}"}}'}
+        if "SELECT r.id, r.state, v.config" in sql:
+            return {"id": self.resource_id, "state": '{"status":"stopped"}', "config": "{}"}
+        if "SELECT s.* FROM snapshots" in sql:
+            return {
+                "id": uuid.uuid4(),
+                "name": "baseline",
+                "parent_name": None,
+                "description": "stable",
+                "state": '{"config":{"name":"old"}}',
+                "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+            }
         raise AssertionError(sql)
 
     async def execute(self, sql: str, *args: object) -> str:
@@ -113,10 +143,17 @@ async def test_qemu_create_sync_async_update_and_delete(
     pool = QemuPool()
     http_request = request(pool)
     create = registry.get("/nodes/{node}/qemu", "POST")
+    listing = registry.get("/nodes/{node}/qemu", "GET")
+    config = registry.get("/nodes/{node}/qemu/{vmid}/config", "GET")
+    current = registry.get("/nodes/{node}/qemu/{vmid}/status/current", "GET")
     update_sync = registry.get("/nodes/{node}/qemu/{vmid}/config", "PUT")
     update_async = registry.get("/nodes/{node}/qemu/{vmid}/config", "POST")
     delete = registry.get("/nodes/{node}/qemu/{vmid}", "DELETE")
-    assert create and update_sync and update_async and delete
+    assert create and listing and config and current and update_sync and update_async and delete
+
+    assert (await listing(http_request, inputs(node="pve1")))[0]["name"] == "vm"
+    assert (await config(http_request, inputs(node="pve1", vmid=150)))["name"] == "vm"
+    assert (await current(http_request, inputs(node="pve1", vmid=150)))["status"] == "stopped"
 
     create_upid = await create(
         http_request,
@@ -185,3 +222,43 @@ async def test_qemu_crud_conflicts_and_missing_resources(
     with pytest.raises(ApiError) as running:
         await delete(http_request, inputs(node="pve1", vmid=150))
     assert running.value.status_code == 409
+
+
+async def test_qemu_snapshot_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
+    tasks: list[str] = []
+
+    class FakeTaskRepository:
+        def __init__(self, pool: object) -> None:
+            del pool
+
+        async def create(self, **kwargs: Any) -> Task:
+            tasks.append(str(kwargs["task_type"]))
+            return Task(uuid.uuid4(), str(kwargs["upid"]), tasks[-1], "queued", {}, 0, False, 0)
+
+    monkeypatch.setattr("app.handlers.qemu.TaskRepository", FakeTaskRepository)
+    registry = HandlerRegistry()
+    register_qemu_handlers(registry)
+    pool = QemuPool()
+    http_request = request(pool)
+    base = "/nodes/{node}/qemu/{vmid}/snapshot"
+
+    listing = registry.get(base, "GET")
+    create = registry.get(base, "POST")
+    get = registry.get(f"{base}/{{snapname}}", "GET")
+    delete = registry.get(f"{base}/{{snapname}}", "DELETE")
+    config_get = registry.get(f"{base}/{{snapname}}/config", "GET")
+    config_put = registry.get(f"{base}/{{snapname}}/config", "PUT")
+    rollback = registry.get(f"{base}/{{snapname}}/rollback", "POST")
+    assert listing and create and get and delete and config_get and config_put and rollback
+
+    common = inputs(node="pve1", vmid=150, snapname="baseline")
+    assert (await listing(http_request, inputs(node="pve1", vmid=150)))[0]["name"] == "baseline"
+    assert (await get(http_request, common))["description"] == "stable"
+    assert (await config_get(http_request, common))["config"] == {"name": "old"}
+    assert await config_put(http_request, inputs(**common["values"], description="updated")) is None
+    assert (
+        await create(http_request, inputs(**common["values"], description="stable"))
+    ).startswith("UPID:pve1:")
+    assert (await rollback(http_request, common)).startswith("UPID:pve1:")
+    assert (await delete(http_request, common)).startswith("UPID:pve1:")
+    assert tasks == ["qemu-snapshot-create", "qemu-snapshot-rollback", "qemu-snapshot-delete"]
