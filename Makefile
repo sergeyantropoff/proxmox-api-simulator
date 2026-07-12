@@ -76,7 +76,7 @@ api-diff: ## Compare API snapshots
 	$(BIN)/proxmox-api-contract diff $(ARGS)
 
 seed: ## Seed simulation data
-	@echo "Database seed is scheduled for milestone D2" >&2; exit 2
+	$(BIN)/python -m app.simulation.seed_cli
 
 clean: ## Remove generated local artifacts
 	rm -rf $(VENV) .coverage coverage.xml htmlcov .mypy_cache .pytest_cache .ruff_cache

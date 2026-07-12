@@ -25,11 +25,14 @@ make docker-up
 curl http://localhost:8006/health/live
 curl http://localhost:8006/health/ready
 make db-migrate
+make seed
 ```
 
 Database migrations are ordered SQL files applied transactionally and recorded
 with SHA-256 checksums. Re-running `make db-migrate` is safe; changing an already
 applied migration is rejected instead of silently drifting the schema.
+The initial `small` seed is deterministic and idempotent: it creates two nodes,
+one stopped QEMU guest, and local storage with stable UUIDv5 identifiers.
 
 Contract artifacts can be validated and imported into immutable local revisions:
 
