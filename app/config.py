@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,6 +32,8 @@ class Settings(BaseSettings):
     db_command_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
     log_level: str = "INFO"
     request_id_header: str = "X-Request-ID"
+    contract_snapshot: Path | None = None
+    contract_fallback: Literal["error", "schema-default", "fixture"] = "error"
 
 
 @lru_cache(maxsize=1)

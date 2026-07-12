@@ -3,9 +3,9 @@
 Stateful asynchronous Proxmox VE API simulator for testing API clients and
 infrastructure tooling without a real hypervisor cluster.
 
-The project is in its foundation stage. Only liveness and PostgreSQL-backed
-readiness endpoints exist. No Proxmox endpoint is claimed as compatible yet; the
-official contract importer and stateful vertical slice are tracked in
+The runnable foundation and authoritative contract toolchain are implemented.
+Imported methods can be registered dynamically, but no stateful Proxmox method
+is claimed as compatible yet; the vertical slice is tracked in
 [the implementation plan](docs/implementation-plan.md).
 
 ## Development
@@ -48,6 +48,12 @@ for CI policy checks:
 .venv/bin/proxmox-api-contract diff old-snapshot.json new-snapshot.json \
   --format markdown
 ```
+
+Set `CONTRACT_SNAPSHOT` to a normalized snapshot file to register its methods
+under both `/api2/json` and `/api2/extjs`. Routes without a semantic handler
+return an explicit 501 by default. `CONTRACT_FALLBACK=schema-default` enables
+schema-only exploration; `fixture` serves only values explicitly embedded in a
+method contract.
 
 See [the architecture](docs/architecture.md) for component boundaries and
 durability decisions. Commands for not-yet-implemented milestones intentionally
