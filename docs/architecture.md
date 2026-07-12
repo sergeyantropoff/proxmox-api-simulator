@@ -90,6 +90,13 @@ domain models and repositories that do not depend on FastAPI or source-specific
 contract structures. PostgreSQL is the system of record for resources, security
 state, locks, scenarios, and tasks.
 
+Durable tasks are acknowledged only after the task row, event, idempotency key,
+and optional resource lock commit together. Workers claim with `SKIP LOCKED`,
+renew real-time leases, persist progress and append-only logs/events, and allow
+expired work to be reclaimed after process failure. Lifespan owns a bounded set
+of asyncio workers and waits for orderly shutdown; PostgreSQL remains the queue
+and source of truth across replicas.
+
 Authentication secrets use salted scrypt hashes. Session tickets are signed and
 expiring; mutation requests use ticket-bound CSRF tokens. API-token privileges
 are intersected with their owning principal's effective propagated ACLs, so a

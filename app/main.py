@@ -10,7 +10,7 @@ from app.api.registry import HandlerRegistry, register_contract_routes
 from app.compatibility import build_report
 from app.config import Settings, get_settings
 from app.contracts.model import Snapshot
-from app.lifespan import DatabaseFactory, create_lifespan, default_database_factory
+from app.lifespan import DatabaseFactory, WorkerFactory, create_lifespan, default_database_factory
 from app.logging import configure_logging
 from app.observability.health import router as health_router
 
@@ -19,6 +19,7 @@ def create_app(
     settings: Settings | None = None,
     database_factory: DatabaseFactory = default_database_factory,
     handlers: HandlerRegistry | None = None,
+    worker_factories: tuple[WorkerFactory, ...] = (),
 ) -> FastAPI:
     """Create an isolated application instance with explicit resource factories."""
 
@@ -27,7 +28,7 @@ def create_app(
     app = FastAPI(
         title=resolved.app_name,
         version="0.0.1",
-        lifespan=create_lifespan(resolved, database_factory),
+        lifespan=create_lifespan(resolved, database_factory, worker_factories),
     )
     app.add_middleware(RequestContextMiddleware, header_name=resolved.request_id_header)
     app.add_exception_handler(Exception, unhandled_exception_handler)

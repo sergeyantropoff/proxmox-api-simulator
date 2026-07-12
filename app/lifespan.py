@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import Protocol
 
 from fastapi import FastAPI
 
@@ -14,7 +16,20 @@ DatabaseFactory = Callable[[Settings], Database]
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 
 
-def create_lifespan(settings: Settings, database_factory: DatabaseFactory) -> Lifespan:
+class LifespanWorker(Protocol):
+    async def run(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+
+WorkerFactory = Callable[[Database], LifespanWorker]
+
+
+def create_lifespan(
+    settings: Settings,
+    database_factory: DatabaseFactory,
+    worker_factories: tuple[WorkerFactory, ...] = (),
+) -> Lifespan:
     """Build a lifespan context so tests can inject a database implementation."""
 
     @asynccontextmanager
@@ -22,9 +37,15 @@ def create_lifespan(settings: Settings, database_factory: DatabaseFactory) -> Li
         database = database_factory(settings)
         await database.connect()
         app.state.database = database
+        workers = tuple(factory(database) for factory in worker_factories)
+        worker_tasks = tuple(asyncio.create_task(worker.run()) for worker in workers)
         try:
             yield
         finally:
+            for worker in workers:
+                worker.stop()
+            if worker_tasks:
+                await asyncio.gather(*worker_tasks)
             await database.close()
 
     return lifespan

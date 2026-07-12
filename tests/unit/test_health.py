@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Self
 
 import pytest
@@ -56,3 +57,27 @@ async def test_health_endpoints(database_ready: bool, status_code: int) -> None:
     assert ready.headers["X-Request-ID"] == "test-request"
     assert database.connected
     assert database.closed
+
+
+async def test_lifespan_starts_and_stops_injected_workers() -> None:
+    database = FakeDatabase(True)
+    started = asyncio.Event()
+    stopping = asyncio.Event()
+
+    class Worker:
+        async def run(self) -> None:
+            started.set()
+            await stopping.wait()
+
+        def stop(self) -> None:
+            stopping.set()
+
+    application = create_app(
+        Settings(),
+        lambda _settings: database,
+        worker_factories=(lambda _database: Worker(),),
+    )
+    async with application.router.lifespan_context(application):
+        await started.wait()
+
+    assert stopping.is_set()
