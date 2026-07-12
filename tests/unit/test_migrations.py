@@ -50,3 +50,4 @@ def test_repository_migration_defines_required_planes() -> None:
         "fault_injections",
     ):
         assert f"CREATE TABLE {table}" in domain
+    assert "CREATE TABLE group_acl_entries" in migrations[5].sql

@@ -178,7 +178,12 @@ async def _authorize(
     rows = await database.pool.fetch(
         """SELECT a.path, a.propagate, r.privileges
         FROM acl_entries a JOIN roles r ON r.name=a.role_name
-        JOIN principals p ON p.id=a.principal_id WHERE p.name=$1""",
+        JOIN principals p ON p.id=a.principal_id WHERE p.name=$1
+        UNION ALL
+        SELECT a.path, a.propagate, r.privileges
+        FROM group_acl_entries a JOIN roles r ON r.name=a.role_name
+        JOIN identity_group_members m ON m.group_id=a.group_id
+        JOIN principals p ON p.id=m.principal_id WHERE p.name=$1""",
         principal,
     )
     entries = tuple(
