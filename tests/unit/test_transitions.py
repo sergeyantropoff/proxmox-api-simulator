@@ -13,6 +13,10 @@ from app.simulation.transitions import InvalidTransitionError, VmState, plan_tra
     [
         (VmState.STOPPED, "start", VmState.RUNNING),
         (VmState.RUNNING, "stop", VmState.STOPPED),
+        (VmState.RUNNING, "shutdown", VmState.STOPPED),
+        (VmState.RUNNING, "reboot", VmState.RUNNING),
+        (VmState.RUNNING, "reset", VmState.RUNNING),
+        (VmState.RUNNING, "suspend", VmState.PAUSED),
         (VmState.RUNNING, "pause", VmState.PAUSED),
         (VmState.PAUSED, "resume", VmState.RUNNING),
         (VmState.RUNNING, "snapshot", VmState.RUNNING),

@@ -12,6 +12,7 @@ from app.api.errors import ApiError
 from app.api.registry import HandlerRegistry
 from app.db.pool import AsyncpgDatabase
 from app.db.primitives import ConflictError
+from app.simulation.transitions import InvalidTransitionError, VmState, plan_transition
 from app.tasks.repository import TaskRepository
 from app.tasks.upid import Upid
 
@@ -71,10 +72,10 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
         if row is None:
             raise ApiError(404, "virtual machine does not exist")
         current = str(_state(row["state"]).get("status", "stopped"))
-        if (operation == "start" and current != "stopped") or (
-            operation == "stop" and current != "running"
-        ):
-            raise ApiError(409, f"cannot {operation} VM while it is {current}")
+        try:
+            plan_transition(VmState(current), operation)
+        except (InvalidTransitionError, ValueError) as error:
+            raise ApiError(409, f"cannot {operation} VM while it is {current}") from error
         timestamp = int(await database.pool.fetchval("SELECT extract(epoch from now())::bigint"))
         pid = int(await database.pool.fetchval("SELECT pg_backend_pid()"))
         upid = str(
@@ -220,6 +221,21 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
     async def stop(request: Request, inputs: dict[str, Any]) -> str:
         return await mutate("stop", request, inputs)
 
+    async def shutdown(request: Request, inputs: dict[str, Any]) -> str:
+        return await mutate("shutdown", request, inputs)
+
+    async def reboot(request: Request, inputs: dict[str, Any]) -> str:
+        return await mutate("reboot", request, inputs)
+
+    async def reset(request: Request, inputs: dict[str, Any]) -> str:
+        return await mutate("reset", request, inputs)
+
+    async def suspend(request: Request, inputs: dict[str, Any]) -> str:
+        return await mutate("suspend", request, inputs)
+
+    async def resume(request: Request, inputs: dict[str, Any]) -> str:
+        return await mutate("resume", request, inputs)
+
     async def task_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         tasks = await TaskRepository(_database(request).pool).list_for_node(
             str(_values(inputs)["node"])
@@ -262,6 +278,11 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
     registry.register("/nodes/{node}/qemu/{vmid}/status/current", "GET", qemu_status)
     registry.register("/nodes/{node}/qemu/{vmid}/status/start", "POST", start)
     registry.register("/nodes/{node}/qemu/{vmid}/status/stop", "POST", stop)
+    registry.register("/nodes/{node}/qemu/{vmid}/status/shutdown", "POST", shutdown)
+    registry.register("/nodes/{node}/qemu/{vmid}/status/reboot", "POST", reboot)
+    registry.register("/nodes/{node}/qemu/{vmid}/status/reset", "POST", reset)
+    registry.register("/nodes/{node}/qemu/{vmid}/status/suspend", "POST", suspend)
+    registry.register("/nodes/{node}/qemu/{vmid}/status/resume", "POST", resume)
     registry.register("/nodes/{node}/tasks", "GET", task_list)
     registry.register("/nodes/{node}/tasks/{upid}/status", "GET", task_status)
     registry.register("/nodes/{node}/tasks/{upid}/log", "GET", task_log)

@@ -74,6 +74,36 @@
       "verb": "PUT",
       "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
       "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py", "tests/unit/test_acl.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/status/shutdown",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_transitions.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/status/reboot",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_transitions.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/status/reset",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_transitions.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/status/suspend",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_transitions.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/status/resume",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_transitions.py", "tests/unit/test_qemu_task.py"]
     }
   ]
 }

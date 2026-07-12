@@ -21,6 +21,11 @@ PUT uses optimistic versioning. Common fields and unknown version-dependent
 parameters are retained in JSONB; duplicate VMIDs and overlapping operations
 fail with 409.
 
+Power lifecycle now includes start, stop, graceful shutdown, reboot, reset,
+suspend, and resume. Every operation is validated by the explicit VM state
+machine, exposes intermediate/final state through current status, and runs as a
+leased task under the same VM lock.
+
 ## Development
 
 Python 3.13 is required.
