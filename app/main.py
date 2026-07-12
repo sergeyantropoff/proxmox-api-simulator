@@ -51,7 +51,7 @@ def create_app(
         resolved_workers = (task_worker,)
     app = FastAPI(
         title=resolved.app_name,
-        version="0.0.1",
+        version="0.1.0",
         lifespan=create_lifespan(resolved, database_factory, resolved_workers or ()),
     )
     app.state.settings = resolved
