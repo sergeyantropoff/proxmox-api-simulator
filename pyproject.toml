@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "proxmox-api-simulator"
-version = "0.0.1"
+version = "0.1.0"
 description = "Stateful asynchronous Proxmox VE API simulator"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -26,6 +26,8 @@ dev = [
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
   "pytest-cov>=6.2,<7",
+  "proxmoxer>=2.3,<2.4",
+  "requests>=2.32,<3",
   "ruff>=0.12,<0.13",
 ]
 
@@ -57,6 +59,7 @@ testpaths = ["tests"]
 markers = [
   "integration: requires PostgreSQL or another external service",
   "contract: validates imported API contracts",
+  "compatibility: exercises an external client against a running simulator",
 ]
 
 [tool.coverage.run]

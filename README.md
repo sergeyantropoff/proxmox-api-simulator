@@ -3,10 +3,9 @@
 Stateful asynchronous Proxmox VE API simulator for testing API clients and
 infrastructure tooling without a real hypervisor cluster.
 
-The runnable foundation and authoritative contract toolchain are implemented.
-Imported methods can be registered dynamically, but no stateful Proxmox method
-is claimed as compatible yet; the vertical slice is tracked in
-[the implementation plan](docs/implementation-plan.md).
+Release 0.1.0 provides a deliberately narrow, stateful vertical slice backed by
+the authoritative imported PVE 9.2.3 contract. Compatibility claims and known
+limits are recorded in [the 0.1.0 compatibility report](docs/compatibility-0.1.0.md).
 
 The bundled PVE 9.2.3 declared contract contains 444 paths and 675 methods.
 Implemented semantics currently include version, ticket login, node listing and
@@ -24,7 +23,9 @@ make install
 make ci
 ```
 
-Local services use plain HTTP at this stage:
+Local services expose internal HTTP on port 8006 and a development-only HTTPS
+gateway on port 8007. The checked-in certificate and key are disposable local
+test credentials and must never be used in production:
 
 ```bash
 cp .env.example .env
@@ -37,6 +38,27 @@ curl http://localhost:8006/api2/json/version
 curl -X POST -d 'username=root@pam&password=secret' \
   http://localhost:8006/api2/json/access/ticket
 ```
+
+Unmodified proxmoxer 2.3 clients use the HTTPS gateway:
+
+```python
+from proxmoxer import ProxmoxAPI
+
+proxmox = ProxmoxAPI(
+    "localhost",
+    port=8007,
+    user="root@pam",
+    password="secret",
+    verify_ssl=False,  # local self-signed development certificate
+)
+print(proxmox.version.get())
+print(proxmox.nodes("pve1").qemu.get())
+```
+
+Run the external-client smoke flow against the Compose network with
+`PROXMOXER_HOST=tls-gateway`, `PROXMOXER_PORT=8443`, and pytest marker
+`compatibility`. It covers login, reads, CSRF-protected mutation, and UPID task
+completion.
 
 Database migrations are ordered SQL files applied transactionally and recorded
 with SHA-256 checksums. Re-running `make db-migrate` is safe; changing an already

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from app.tasks.repository import Task, TaskRepository
 
 TaskHandler = Callable[[Task], Awaitable[dict[str, Any] | None]]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -31,7 +33,14 @@ class TaskWorker:
                 if len(self._running) >= self.concurrency:
                     await asyncio.sleep(self.poll_seconds)
                     continue
-                task = await self.repository.claim(self.worker_id, self.lease_seconds)
+                try:
+                    task = await self.repository.claim(self.worker_id, self.lease_seconds)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("task claim failed; polling will retry")
+                    await asyncio.sleep(self.poll_seconds)
+                    continue
                 if task is None:
                     await asyncio.sleep(self.poll_seconds)
                     continue

@@ -13,7 +13,7 @@ RUN pip install --upgrade "pip>=25.1,<26" && pip install .
 
 FROM python:3.13-slim-bookworm AS runtime
 
-ARG APP_VERSION=0.0.1
+ARG APP_VERSION=0.1.0
 LABEL org.opencontainers.image.title="proxmox-api-simulator" \
       org.opencontainers.image.version="$APP_VERSION" \
       org.opencontainers.image.source="https://github.com/example/proxmox-api-simulator"

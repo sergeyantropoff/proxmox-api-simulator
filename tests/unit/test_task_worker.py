@@ -1,5 +1,6 @@
 """Bounded task worker outcome tests."""
 
+import asyncio
 import uuid
 from typing import cast
 
@@ -72,3 +73,28 @@ async def test_worker_honors_persisted_cancellation() -> None:
 
     assert not called
     assert repository.finishes == [("cancelled", None)]
+
+
+async def test_worker_retries_after_claim_failure() -> None:
+    class RecoveringRepository:
+        attempts = 0
+
+        async def claim(self, _worker_id: str, _lease_seconds: float) -> None:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("database schema is not ready")
+            return None
+
+    repository = RecoveringRepository()
+    worker = TaskWorker(
+        cast(TaskRepository, repository),
+        "worker",
+        {},
+        poll_seconds=0.001,
+    )
+    running = asyncio.create_task(worker.run())
+    await asyncio.sleep(0.01)
+    worker.stop()
+    await running
+
+    assert repository.attempts > 1
