@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "hypothesis>=6.135,<7",
   "httpx>=0.28,<0.29",
   "mypy>=1.17,<1.18",
   "pytest>=8.4,<9",
@@ -62,4 +63,3 @@ source = ["app"]
 [tool.coverage.report]
 fail_under = 80
 show_missing = true
-
