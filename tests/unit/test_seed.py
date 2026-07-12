@@ -22,6 +22,12 @@ def test_small_profile_has_stable_logical_state() -> None:
                 "state": {"name": "demo", "status": "stopped"},
             },
             {
+                "kind": "qemu",
+                "external_id": "101",
+                "node": "pve1",
+                "state": {"name": "worker", "status": "stopped"},
+            },
+            {
                 "kind": "storage",
                 "external_id": "local",
                 "node": "pve1",

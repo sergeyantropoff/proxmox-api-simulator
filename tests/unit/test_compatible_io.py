@@ -11,6 +11,7 @@ from app.api.registry import HandlerRegistry
 from app.config import Settings
 from app.contracts.model import Method, Parameter, PathContract, Schema, Snapshot
 from app.main import create_app
+from app.security.auth import csrf_token, issue_ticket
 from tests.unit.test_health import FakeDatabase
 
 
@@ -44,9 +45,19 @@ async def client_for(tmp_path: Path) -> AsyncClient:
 
     handlers.register("/nodes/{node}/test", "POST", handler)
     app = create_app(
-        Settings(contract_snapshot=path), lambda _settings: FakeDatabase(True), handlers
+        Settings(contract_snapshot=path),
+        lambda _settings: FakeDatabase(True),
+        handlers,
+        worker_factories=(),
     )
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    key = Settings().ticket_signing_key.get_secret_value().encode()
+    ticket = issue_ticket("root@pam", key)
+    return AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        cookies={"PVEAuthCookie": ticket},
+        headers={"CSRFPreventionToken": csrf_token(ticket, key)},
+    )
 
 
 async def test_json_input_and_null_envelope(tmp_path: Path) -> None:

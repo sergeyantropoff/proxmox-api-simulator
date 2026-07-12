@@ -62,6 +62,13 @@ def small_profile() -> SeedProfile:
             stable_id("qemu:100"), first.id, "qemu", "100", {"name": "demo", "status": "stopped"}
         ),
         SeedResource(
+            stable_id("qemu:101"),
+            first.id,
+            "qemu",
+            "101",
+            {"name": "worker", "status": "stopped"},
+        ),
+        SeedResource(
             stable_id("storage:local"), first.id, "storage", "local", {"content": ["iso", "backup"]}
         ),
     )
