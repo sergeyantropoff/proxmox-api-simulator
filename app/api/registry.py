@@ -34,6 +34,9 @@ class HandlerRegistry:
     def get(self, path: str, verb: str) -> Handler | None:
         return self._handlers.get((path, verb.upper()))
 
+    def keys(self) -> frozenset[tuple[str, str]]:
+        return frozenset(self._handlers)
+
 
 def register_contract_routes(
     app: FastAPI,
