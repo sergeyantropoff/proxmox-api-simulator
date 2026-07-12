@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:17.5-bookworm
+    environment:
+      POSTGRES_DB: proxmox_simulator
+      POSTGRES_USER: proxmox
+      POSTGRES_PASSWORD: proxmox
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proxmox -d proxmox_simulator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  simulator:
+    build:
+      context: .
+      target: runtime
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://proxmox:proxmox@postgres:5432/proxmox_simulator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "8006:8006"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres-data:
