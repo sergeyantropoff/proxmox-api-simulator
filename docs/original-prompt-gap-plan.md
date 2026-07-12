@@ -41,9 +41,9 @@ large seeding proves bounded batch operations rather than row-at-a-time inserts.
 
 ## G3 — authentication and authorization surface
 
-- [ ] Expose API-token lifecycle and authenticate
+- [x] Expose API-token lifecycle and authenticate
   `PVEAPIToken=USER@REALM!TOKENID=SECRET` without CSRF.
-- [ ] Complete pam, pve, and test realm behavior, ticket skew/expiry and
+- [x] Complete pam, pve, and test realm behavior, ticket skew/expiry and
   credential redaction.
 - [ ] Wire users, groups, roles, ACL propagation, route-derived permissions and
   token privilege separation into every semantic handler.

@@ -125,7 +125,7 @@ async def _authenticate(
         except ValueError as error:
             raise ApiError(401, "authentication failure") from error
         row = await database.pool.fetchrow(
-            """SELECT p.name, t.secret_hash, t.privileges
+            """SELECT p.name, t.secret_hash, t.privileges, t.privilege_separation
             FROM api_tokens t JOIN principals p ON p.id=t.principal_id
             WHERE p.name=$1 AND t.token_id=$2
               AND (t.expires_at IS NULL OR t.expires_at > now())""",
@@ -135,7 +135,11 @@ async def _authenticate(
         if row is None or not verify_secret(parsed_token.secret, str(row["secret_hash"])):
             raise ApiError(401, "authentication failure")
         principal = str(row["name"])
-        token_privileges = frozenset(str(item) for item in row["privileges"])
+        token_privileges = (
+            frozenset(str(item) for item in row["privileges"])
+            if bool(row["privilege_separation"])
+            else None
+        )
     else:
         ticket = request.cookies.get("PVEAuthCookie")
         if ticket is None:

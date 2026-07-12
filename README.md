@@ -10,9 +10,9 @@ limits are recorded in [the 0.1.0 compatibility report](docs/compatibility-0.1.0
 The bundled PVE 9.2.3 declared contract contains 444 paths and 675 methods.
 Implemented semantics currently include version, ticket login, node listing and
 status, cluster resources, basic QEMU list/config/status/start/stop, and task
-list/status/log. Mutations require the ticket-bound CSRF header and execute
-through PostgreSQL-leased workers; all other declared methods return an explicit
-unsupported error.
+list/status/log, plus API-token list/create/read/update/delete. Mutations require
+the ticket-bound CSRF header and execute through PostgreSQL-leased workers; all
+other declared methods return an explicit unsupported error.
 
 ## Development
 
@@ -62,6 +62,11 @@ authentication use proxmoxer `token_name="automation"` and
 work, while QEMU power operations return 403. API-token requests do not require
 CSRF; ticket-authenticated mutations still do. These are disposable local test
 credentials only.
+
+Token lifecycle is available at
+`/access/users/{userid}/token[/{tokenid}]`. A generated secret is returned only
+by create or explicit regenerate; only its scrypt hash is stored. List/read never
+return token values, and deletion immediately invalidates authentication.
 
 Run the external-client smoke flow against the Compose network with
 `PROXMOXER_HOST=tls-gateway`, `PROXMOXER_PORT=8443`, and pytest marker
