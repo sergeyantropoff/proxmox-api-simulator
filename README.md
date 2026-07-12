@@ -10,9 +10,16 @@ limits are recorded in [the 0.1.0 compatibility report](docs/compatibility-0.1.0
 The bundled PVE 9.2.3 declared contract contains 444 paths and 675 methods.
 Implemented semantics currently include version, ticket login, node listing and
 status, cluster resources, basic QEMU list/config/status/start/stop, and task
-list/status/log, plus API-token list/create/read/update/delete. Mutations require
-the ticket-bound CSRF header and execute through PostgreSQL-leased workers; all
-other declared methods return an explicit unsupported error.
+list/status/log, QEMU create/sync-update/async-update/delete, plus API-token
+list/create/read/update/delete. Mutations require the ticket-bound CSRF header
+and execute through PostgreSQL-leased workers; all other declared methods return
+an explicit unsupported error.
+
+QEMU create, asynchronous config update, and delete return durable UPIDs and use
+the same PostgreSQL resource lock as lifecycle operations. Synchronous config
+PUT uses optimistic versioning. Common fields and unknown version-dependent
+parameters are retained in JSONB; duplicate VMIDs and overlapping operations
+fail with 409.
 
 ## Development
 

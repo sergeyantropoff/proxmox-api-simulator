@@ -50,6 +50,30 @@
       "verb": "GET",
       "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "response_field_types", "response_required_fields", "long_task_behavior", "permissions"],
       "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_task_worker.py", "tests/unit/test_upid.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}",
+      "verb": "DELETE",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/config",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py", "tests/unit/test_qemu_task.py", "tests/unit/test_acl.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/config",
+      "verb": "PUT",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py", "tests/unit/test_acl.py"]
     }
   ]
 }

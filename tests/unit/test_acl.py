@@ -43,3 +43,19 @@ def test_contract_permission_maps_to_capability_requirement() -> None:
     assert requirement is not None
     assert requirement.path == "/vms/100"
     assert requirement.privileges == frozenset({"VM.PowerMgmt"})
+
+    any_permission = Permissions(
+        expression={
+            "check": ["perm", "/vms/{vmid}", ["VM.Config.CPU", "VM.Config.Memory"], "any", 1]
+        }
+    )
+    any_requirement = requirement_from_contract(any_permission, {"vmid": "100"})
+    assert any_requirement is not None
+    assert not any_requirement.require_all
+    assert authorize(
+        "alice@pve",
+        "/vms/100",
+        any_requirement.privileges,
+        (AclEntry("alice@pve", "/vms", frozenset({"VM.Config.CPU"})),),
+        require_all=any_requirement.require_all,
+    )

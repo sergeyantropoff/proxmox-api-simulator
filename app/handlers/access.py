@@ -101,6 +101,7 @@ def register_access_handlers(registry: HandlerRegistry) -> None:
 
     async def token_update(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         values = _values(inputs)
+        provided = frozenset(str(item) for item in inputs.get("provided", values))
         userid, tokenid = str(values["userid"]), str(values["tokenid"])
         _require_owner(request, userid)
         regenerate = bool(values.get("regenerate", False))
@@ -117,9 +118,9 @@ def register_access_handlers(registry: HandlerRegistry) -> None:
                 extract(epoch from t.expires_at)::bigint AS expire""",
             userid,
             tokenid,
-            values.get("comment"),
-            _expire_value(values),
-            values.get("privsep"),
+            values.get("comment") if "comment" in provided else None,
+            _expire_value(values) if "expire" in provided else None,
+            values.get("privsep") if "privsep" in provided else None,
             hash_secret(secret) if secret is not None else None,
         )
         if row is None:

@@ -43,7 +43,13 @@ def create_app(
             return TaskWorker(
                 repository,
                 "simulator-worker",
-                {"qemu-start": handler, "qemu-stop": handler},
+                {
+                    "qemu-create": handler,
+                    "qemu-delete": handler,
+                    "qemu-start": handler,
+                    "qemu-stop": handler,
+                    "qemu-update": handler,
+                },
                 concurrency=resolved.task_worker_concurrency,
                 lease_seconds=resolved.task_lease_seconds,
             )

@@ -57,17 +57,19 @@ def authorize(
     entries: tuple[AclEntry, ...],
     *,
     token_privileges: frozenset[str] | None = None,
+    require_all: bool = True,
 ) -> bool:
     privileges = effective_privileges(principal, path, entries)
     if token_privileges is not None:
         privileges &= token_privileges
-    return required <= privileges
+    return required <= privileges if require_all else bool(required & privileges)
 
 
 @dataclass(frozen=True, slots=True)
 class CapabilityRequirement:
     path: str
     privileges: frozenset[str]
+    require_all: bool = True
 
 
 def requirement_from_contract(
@@ -84,4 +86,7 @@ def requirement_from_contract(
     raw_privileges = check[2]
     if not isinstance(raw_privileges, list):
         return None
-    return CapabilityRequirement(raw_path, frozenset(str(item) for item in raw_privileges))
+    require_all = not (len(check) >= 4 and check[3] == "any")
+    return CapabilityRequirement(
+        raw_path, frozenset(str(item) for item in raw_privileges), require_all
+    )

@@ -14,7 +14,7 @@ from app.api.errors import ApiError, ContractValidationError
 from app.config import Settings
 from app.contracts.model import Method, Schema, Snapshot
 from app.db.pool import AsyncpgDatabase
-from app.security.acl import AclEntry, authorize, requirement_from_contract
+from app.security.acl import AclEntry, CapabilityRequirement, authorize, requirement_from_contract
 from app.security.auth import parse_api_token, verify_csrf, verify_secret, verify_ticket
 
 Handler = Callable[[Request, dict[str, Any]], Awaitable[Any]]
@@ -159,13 +159,14 @@ async def _authenticate(
     if principal == "root@pam" and token_privileges is None:
         return
     database = cast(AsyncpgDatabase, request.app.state.database)
-    await _authorize(database, principal, token_privileges, method, inputs)
+    await _authorize(database, principal, token_privileges, semantic_path, method, inputs)
 
 
 async def _authorize(
     database: AsyncpgDatabase,
     principal: str,
     token_privileges: frozenset[str] | None,
+    semantic_path: str,
     method: Method,
     inputs: dict[str, Any],
 ) -> None:
@@ -173,6 +174,8 @@ async def _authorize(
     requirement = requirement_from_contract(
         method.permissions, {name: str(value) for name, value in values.items()}
     )
+    if requirement is None and semantic_path == "/nodes/{node}/qemu" and method.verb == "POST":
+        requirement = CapabilityRequirement(f"/vms/{values['vmid']}", frozenset({"VM.Allocate"}))
     if requirement is None:
         return
     rows = await database.pool.fetch(
@@ -201,6 +204,7 @@ async def _authorize(
         requirement.privileges,
         entries,
         token_privileges=token_privileges,
+        require_all=requirement.require_all,
     ):
         raise ApiError(403, "permission check failed")
 
@@ -241,7 +245,11 @@ async def _parse_inputs(request: Request, method: Method) -> dict[str, Any]:
             errors[name] = "property is not defined in schema"
     if errors:
         raise ContractValidationError(dict(sorted(errors.items())))
-    return {"values": parsed, "path": dict(request.path_params)}
+    return {
+        "values": parsed,
+        "path": dict(request.path_params),
+        "provided": tuple(sorted(supplied)),
+    }
 
 
 def _coerce(value: Any, schema: Schema) -> Any:

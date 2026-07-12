@@ -61,6 +61,45 @@ class Repository:
         self.logs.append(message)
 
 
+class Transaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+class CrudConnection:
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+
+    def transaction(self) -> Transaction:
+        return Transaction()
+
+    async def fetchrow(self, sql: str, *args: object) -> dict[str, object] | None:
+        del args
+        if "FROM nodes" in sql:
+            return {"id": uuid.uuid4(), "cluster_id": uuid.uuid4()}
+        if "JOIN virtual_machines" in sql:
+            return {"state": '{"status":"stopped","name":"old"}', "config": '{"name":"old"}'}
+        return None
+
+    async def execute(self, sql: str, *args: object) -> str:
+        del args
+        self.commands.append(sql)
+        return "DELETE 1" if sql.startswith("DELETE") else "UPDATE 1"
+
+
+class CrudRepository:
+    def __init__(self) -> None:
+        self.connection = CrudConnection()
+        self.pool = Pool(cast(Connection, self.connection))
+        self.logs: list[str] = []
+
+    async def append_log(self, _task_id: uuid.UUID, message: str) -> None:
+        self.logs.append(message)
+
+
 async def test_qemu_worker_applies_intermediate_and_final_states() -> None:
     repository = Repository()
     task = Task(
@@ -82,3 +121,57 @@ async def test_qemu_worker_applies_intermediate_and_final_states() -> None:
     assert '"starting"' in repository.connection.states[0]
     assert '"running"' in repository.connection.states[1]
     assert repository.logs == ["VM start started", "VM start completed"]
+
+
+async def test_qemu_worker_create_update_and_delete_are_persistent() -> None:
+    repository = CrudRepository()
+    handler = qemu_handler(cast(TaskRepository, repository), cast(Clock, ImmediateClock()))
+    resource_id = uuid.uuid4()
+
+    created = await handler(
+        Task(
+            uuid.uuid4(),
+            "UPID:create",
+            "qemu-create",
+            "running",
+            {"node": "pve1", "vmid": 150, "config": {"name": "new"}},
+            0,
+            False,
+            1,
+        )
+    )
+    updated = await handler(
+        Task(
+            uuid.uuid4(),
+            "UPID:update",
+            "qemu-update",
+            "running",
+            {
+                "resource_id": str(resource_id),
+                "changes": {"name": "changed", "cores": 4},
+                "delete": "unused",
+            },
+            0,
+            False,
+            1,
+        )
+    )
+    deleted = await handler(
+        Task(
+            uuid.uuid4(),
+            "UPID:delete",
+            "qemu-delete",
+            "running",
+            {"resource_id": str(resource_id)},
+            0,
+            False,
+            1,
+        )
+    )
+
+    assert created == {"vmid": 150, "status": "stopped"}
+    assert updated == {"updated": ["cores", "name"], "deleted": ["unused"]}
+    assert deleted == {"deleted": True}
+    assert any("INSERT INTO resources" in command for command in repository.connection.commands)
+    assert any("UPDATE virtual_machines" in command for command in repository.connection.commands)
+    assert any("DELETE FROM resources" in command for command in repository.connection.commands)
