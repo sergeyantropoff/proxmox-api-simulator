@@ -1,0 +1,12 @@
+{
+  "artifact_etag": "\"4144c0-655b144140900\"",
+  "artifact_last_modified": "Fri, 03 Jul 2026 09:08:20 GMT",
+  "artifact_sha256": "f2b77b57c71f3781a0993cc5062940ef31e0843fd9a6bcfdb4de4dd2001d6d9e",
+  "artifact_size": 4277440,
+  "artifact_url": "https://pve.proxmox.com/pve-docs/api-viewer/apidoc.js",
+  "documentation_version": "9.2.3",
+  "fixture_json_pointer": "/5",
+  "fixture_sha256": "ad572969bbab259a10380ec11ac1c67f865e601be7c5aeec201fca368341c3fe",
+  "retrieved_at": "2026-07-12T23:08:59+03:00",
+  "viewer_url": "https://pve.proxmox.com/pve-docs/api-viewer/"
+}
