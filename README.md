@@ -10,7 +10,9 @@ is claimed as compatible yet; the vertical slice is tracked in
 
 The bundled PVE 9.2.3 declared contract contains 444 paths and 675 methods.
 Implemented semantics currently include version, ticket login, node listing and
-status, and cluster resources; all other declared methods return an explicit
+status, cluster resources, basic QEMU list/config/status/start/stop, and task
+list/status/log. Mutations require the ticket-bound CSRF header and execute
+through PostgreSQL-leased workers; all other declared methods return an explicit
 unsupported error.
 
 ## Development

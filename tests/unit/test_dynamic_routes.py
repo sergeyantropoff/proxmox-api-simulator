@@ -48,6 +48,7 @@ async def request_app(
         settings,
         lambda _settings: database,
         handlers if handlers is not None else HandlerRegistry(),
+        worker_factories=(),
     )
     async with app.router.lifespan_context(app):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

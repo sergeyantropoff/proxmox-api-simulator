@@ -11,6 +11,7 @@ from app.api.errors import ApiError
 from app.api.registry import HandlerRegistry
 from app.config import Settings
 from app.db.pool import AsyncpgDatabase
+from app.handlers.qemu import register_qemu_handlers
 from app.security.auth import csrf_token, issue_ticket, verify_secret
 
 
@@ -92,4 +93,5 @@ def build_core_handlers(settings: Settings) -> HandlerRegistry:
     registry.register("/nodes", "GET", nodes)
     registry.register("/nodes/{node}/status", "GET", node_status)
     registry.register("/cluster/resources", "GET", resources)
+    register_qemu_handlers(registry)
     return registry

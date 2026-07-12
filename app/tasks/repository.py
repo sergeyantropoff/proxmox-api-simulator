@@ -178,6 +178,18 @@ class TaskRepository:
         row = await self.pool.fetchrow("SELECT * FROM tasks WHERE id=$1", task_id)
         return _task(row) if row is not None else None
 
+    async def get_by_upid(self, upid: str) -> Task | None:
+        row = await self.pool.fetchrow("SELECT * FROM tasks WHERE upid=$1", upid)
+        return _task(row) if row is not None else None
+
+    async def list_for_node(self, node: str) -> tuple[Task, ...]:
+        rows = await self.pool.fetch(
+            """SELECT * FROM tasks WHERE payload->>'node'=$1
+            ORDER BY created_at DESC LIMIT 1000""",
+            node,
+        )
+        return tuple(_task(row) for row in rows)
+
     async def logs(self, task_id: uuid.UUID) -> tuple[str, ...]:
         rows = await self.pool.fetch(
             "SELECT message FROM task_logs WHERE task_id=$1 ORDER BY sequence", task_id

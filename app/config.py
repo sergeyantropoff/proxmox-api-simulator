@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     contract_snapshot: Path | None = None
     contract_fallback: Literal["error", "schema-default", "fixture"] = "error"
     ticket_signing_key: SecretStr = SecretStr("development-only-signing-key-change-me")
+    task_worker_concurrency: int = Field(default=2, ge=1, le=32)
+    task_lease_seconds: float = Field(default=30.0, gt=1, le=300)
+    simulation_time_scale: float = Field(default=10.0, gt=0, le=10000)
 
 
 @lru_cache(maxsize=1)

@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.errors import ContractValidationError
+from app.api.errors import ApiError, ContractValidationError
+from app.config import Settings
 from app.contracts.model import Method, Schema, Snapshot
+from app.security.auth import verify_csrf, verify_ticket
 
 Handler = Callable[[Request, dict[str, Any]], Awaitable[Any]]
 FallbackMode = Literal["error", "schema-default", "fixture"]
@@ -79,6 +81,7 @@ def _endpoint(
     fallback: FallbackMode,
 ) -> Callable[[Request], Awaitable[JSONResponse]]:
     async def dispatch(request: Request) -> JSONResponse:
+        _authenticate(request, semantic_path)
         handler = handlers.get(semantic_path, method.verb)
         inputs = await _parse_inputs(request, method)
         if handler is not None:
@@ -92,11 +95,35 @@ def _endpoint(
                 status_code=501,
                 content={"data": None, "errors": "method semantics are not implemented"},
             )
-        if renderer == "extjs":
-            return JSONResponse({"data": data, "success": True})
-        return JSONResponse({"data": data})
+        content = {"data": data, "success": True} if renderer == "extjs" else {"data": data}
+        response = JSONResponse(content)
+        if semantic_path == "/access/ticket" and isinstance(data, dict):
+            ticket = data.get("ticket")
+            if isinstance(ticket, str):
+                response.set_cookie(
+                    "PVEAuthCookie", ticket, httponly=True, samesite="strict", path="/"
+                )
+        return response
 
     return dispatch
+
+
+def _authenticate(request: Request, semantic_path: str) -> None:
+    if semantic_path in {"/version", "/access/ticket"}:
+        return
+    ticket = request.cookies.get("PVEAuthCookie")
+    if ticket is None:
+        raise ApiError(401, "authentication required")
+    settings = cast(Settings, request.app.state.settings)
+    key = settings.ticket_signing_key.get_secret_value().encode()
+    try:
+        verify_ticket(ticket, key)
+    except ValueError as error:
+        raise ApiError(401, "authentication failure") from error
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        token = request.headers.get("CSRFPreventionToken", "")
+        if not verify_csrf(ticket, token, key):
+            raise ApiError(403, "invalid CSRF prevention token")
 
 
 async def _parse_inputs(request: Request, method: Method) -> dict[str, Any]:
