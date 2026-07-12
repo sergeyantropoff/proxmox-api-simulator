@@ -24,7 +24,9 @@ worker tests; a single smoke run chooses the transition valid for current state.
 - Core: version, ticket login, node list/status, and cluster resources.
 - QEMU: list, configuration, current status, start, and stop.
 - Tasks: node task list, status, and append-only log.
-- Authentication: ticket cookie and ticket-bound CSRF validation for mutations.
+- Authentication: ticket cookie and ticket-bound CSRF validation for mutations,
+  plus hashed API-token authentication without CSRF and token privilege
+  separation at the contract-derived ACL boundary.
 - Persistence: PostgreSQL resources, durable leased tasks, and deterministic
   `small` seed data.
 
