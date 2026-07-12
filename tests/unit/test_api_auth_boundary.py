@@ -25,6 +25,7 @@ class FakePool:
             "name": principal,
             "secret_hash": self.secret_hash,
             "privileges": self.token_privileges,
+            "privilege_separation": True,
         }
 
     async def fetch(self, _query: str, principal: str) -> list[dict[str, Any]]:

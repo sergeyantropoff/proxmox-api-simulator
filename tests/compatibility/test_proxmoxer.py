@@ -48,6 +48,26 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
         readonly_api.nodes("pve1").qemu("101").status.start.post()
     assert denied.value.status_code == 403
 
+    token_endpoint = proxmox.access.users("root@pam").token("ephemeral")
+    created = token_endpoint.post(comment="compatibility lifecycle", privsep=0)
+    assert created["full-tokenid"] == "root@pam!ephemeral"
+    ephemeral = ProxmoxAPI(
+        os.environ["PROXMOXER_HOST"],
+        port=int(os.getenv("PROXMOXER_PORT", "8007")),
+        user="root@pam",
+        token_name=os.getenv("PROXMOXER_EPHEMERAL_TOKEN_NAME", "ephemeral"),
+        token_value=created["value"],
+        verify_ssl=False,
+    )
+    assert ephemeral.nodes.get()
+    updated = token_endpoint.put(comment="updated", privsep=0)
+    assert updated["comment"] == "updated"
+    assert token_endpoint.get()["comment"] == "updated"
+    token_endpoint.delete()
+    with pytest.raises(ResourceException) as removed:
+        ephemeral.nodes.get()
+    assert removed.value.status_code == 401
+
     if os.getenv("PROXMOXER_MUTATION_TEST") == "1":
         status = proxmox.nodes("pve1").qemu("101").status.current.get()
         operation = "start" if status["status"] == "stopped" else "stop"
