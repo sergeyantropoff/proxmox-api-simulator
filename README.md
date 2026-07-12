@@ -68,8 +68,26 @@ response, state, task, error, and permission dimensions.
 Database migrations are ordered SQL files applied transactionally and recorded
 with SHA-256 checksums. Re-running `make db-migrate` is safe; changing an already
 applied migration is rejected instead of silently drifting the schema.
-The initial `small` seed is deterministic and idempotent: it creates two nodes,
-one stopped QEMU guest, and local storage with stable UUIDv5 identifiers.
+Seed profiles are deterministic and replace the previously seeded simulation
+state atomically. `small` creates one node, two QEMU guests, one LXC, two
+storages, an administrator, and completed task history. `medium` creates three
+nodes, 50 QEMU guests, 20 LXC guests, shared/local storage and a pool;
+`ha-demo` adds HA state, while `broken-storage` makes one storage unavailable.
+`large` uses bounded asyncpg batch operations and is configurable through
+`SEED_LARGE_NODES` and `SEED_LARGE_RESOURCES` (10,000 resources by default):
+
+```bash
+make seed PROFILE=small
+make seed PROFILE=medium
+make seed PROFILE=large
+make seed PROFILE=ha-demo
+make seed PROFILE=broken-storage
+```
+
+All stable simulation identifiers use UUIDv5. Migration 004 adds normalized
+cluster, QEMU, LXC, storage/content, snapshot, backup, pool, identity,
+observation and fault-rule tables while generic resources remain the current
+0.1 compatibility boundary.
 
 Contract artifacts can be validated and imported into immutable local revisions:
 
