@@ -262,3 +262,52 @@ async def test_qemu_snapshot_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (await rollback(http_request, common)).startswith("UPID:pve1:")
     assert (await delete(http_request, common)).startswith("UPID:pve1:")
     assert tasks == ["qemu-snapshot-create", "qemu-snapshot-rollback", "qemu-snapshot-delete"]
+
+
+async def test_qemu_clone_and_migrate_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
+    tasks: list[dict[str, Any]] = []
+
+    class FakeTaskRepository:
+        def __init__(self, pool: object) -> None:
+            del pool
+
+        async def create(self, **kwargs: Any) -> Task:
+            tasks.append(kwargs)
+            return Task(
+                uuid.uuid4(),
+                str(kwargs["upid"]),
+                str(kwargs["task_type"]),
+                "queued",
+                {},
+                0,
+                False,
+                0,
+            )
+
+    monkeypatch.setattr("app.handlers.qemu.TaskRepository", FakeTaskRepository)
+    registry = HandlerRegistry()
+    register_qemu_handlers(registry)
+    pool = QemuPool()
+    http_request = request(pool)
+    clone = registry.get("/nodes/{node}/qemu/{vmid}/clone", "POST")
+    migrate_get = registry.get("/nodes/{node}/qemu/{vmid}/migrate", "GET")
+    migrate = registry.get("/nodes/{node}/qemu/{vmid}/migrate", "POST")
+    assert clone and migrate_get and migrate
+
+    clone_upid = await clone(
+        http_request, inputs(node="pve1", vmid=150, newid=151, name="clone", full=True)
+    )
+    assert clone_upid.startswith("UPID:pve1:")
+    assert tasks[-1]["task_type"] == "qemu-clone"
+    assert (await migrate_get(http_request, inputs(node="pve1", vmid=150, target="pve2")))[
+        "local_disks"
+    ] == []
+    migrate_upid = await migrate(
+        http_request, inputs(node="pve1", vmid=150, target="pve2", online=False)
+    )
+    assert migrate_upid.startswith("UPID:pve1:")
+    assert tasks[-1]["task_type"] == "qemu-migrate"
+
+    with pytest.raises(ApiError) as same_node:
+        await migrate(http_request, inputs(node="pve1", vmid=150, target="pve1"))
+    assert same_node.value.status_code == 400

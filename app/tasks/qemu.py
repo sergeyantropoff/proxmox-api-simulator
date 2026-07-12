@@ -18,6 +18,8 @@ def qemu_handler(repository: TaskRepository, clock: Clock) -> TaskHandler:
         operation = task.task_type.removeprefix("qemu-")
         if operation == "create":
             return await _create(repository, task)
+        if operation == "clone":
+            return await _clone(repository, task)
         resource_id = uuid.UUID(str(task.payload["resource_id"]))
         if operation == "update":
             return await _update(repository, task, resource_id)
@@ -27,6 +29,8 @@ def qemu_handler(repository: TaskRepository, clock: Clock) -> TaskHandler:
             return await _snapshot(
                 repository, task, resource_id, operation.removeprefix("snapshot-")
             )
+        if operation == "migrate":
+            return await _migrate(repository, task, resource_id, clock)
         async with repository.pool.acquire() as connection:
             row = await connection.fetchrow("SELECT state FROM resources WHERE id=$1", resource_id)
             if row is None:
@@ -199,6 +203,79 @@ async def _snapshot(
                 raise ValueError(f"unsupported snapshot operation: {operation}")
     await repository.append_log(task.id, f"snapshot {name} {operation} completed")
     return {"snapshot": name, "operation": operation}
+
+
+async def _clone(repository: TaskRepository, task: Task) -> dict[str, Any]:
+    source_id = uuid.UUID(str(task.payload["source_resource_id"]))
+    target_id = uuid.uuid4()
+    node, vmid = str(task.payload["node"]), int(task.payload["vmid"])
+    async with repository.pool.acquire() as connection:
+        async with connection.transaction():
+            source = await connection.fetchrow(
+                """SELECT r.state, v.config FROM resources r
+                JOIN virtual_machines v ON v.resource_id=r.id WHERE r.id=$1""",
+                source_id,
+            )
+            target = await connection.fetchrow(
+                "SELECT id, cluster_id FROM nodes WHERE name=$1", node
+            )
+            if source is None or target is None:
+                raise ValueError("clone source or target disappeared")
+            config = _object(source["config"])
+            if task.payload.get("name") is not None:
+                config["name"] = task.payload["name"]
+            state = {**_object(source["state"]), **config, "status": "stopped"}
+            await connection.execute(
+                """INSERT INTO resources(id,node_id,cluster_id,kind,external_id,state,metadata)
+                VALUES($1,$2,$3,'qemu',$4,$5::jsonb,'{}'::jsonb)""",
+                target_id,
+                target["id"],
+                target["cluster_id"],
+                str(vmid),
+                json.dumps(state),
+            )
+            await connection.execute(
+                """INSERT INTO virtual_machines(resource_id,cluster_id,vmid,config)
+                VALUES($1,$2,$3,$4::jsonb)""",
+                target_id,
+                target["cluster_id"],
+                vmid,
+                json.dumps(config),
+            )
+    await repository.append_log(task.id, f"VM cloned to {vmid}")
+    return {"vmid": vmid, "node": node}
+
+
+async def _migrate(
+    repository: TaskRepository, task: Task, resource_id: uuid.UUID, clock: Clock
+) -> dict[str, Any]:
+    target = str(task.payload["target"])
+    async with repository.pool.acquire() as connection:
+        row = await connection.fetchrow("SELECT state FROM resources WHERE id=$1", resource_id)
+        if row is None:
+            raise ValueError("resource disappeared")
+        state = _object(row["state"])
+        transition = plan_transition(VmState(str(state["status"])), "migrate")
+        state["status"] = transition.intermediate
+        await connection.execute(
+            "UPDATE resources SET state=$2::jsonb WHERE id=$1", resource_id, json.dumps(state)
+        )
+    await repository.append_log(task.id, f"migration to {target} started")
+    await clock.sleep(1.0)
+    async with repository.pool.acquire() as connection:
+        node = await connection.fetchrow("SELECT id FROM nodes WHERE name=$1", target)
+        if node is None:
+            raise ValueError("target node disappeared")
+        state["status"] = transition.after
+        await connection.execute(
+            """UPDATE resources SET node_id=$2,state=$3::jsonb,version=version+1,
+            updated_at=now() WHERE id=$1""",
+            resource_id,
+            node["id"],
+            json.dumps(state),
+        )
+    await repository.append_log(task.id, f"migration to {target} completed")
+    return {"node": target, "status": str(transition.after)}
 
 
 def _object(value: object) -> dict[str, Any]:

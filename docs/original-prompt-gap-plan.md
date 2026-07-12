@@ -58,8 +58,9 @@ plaintext password, ticket, CSRF token, or token secret reaches storage/logs.
 - [x] Create, synchronous/asynchronous update, and delete.
 - [x] Shutdown, reboot, reset, suspend and resume.
 - [x] Snapshots and rollback.
-- [ ] Clone, local/remote migration, resize and move disk, selected agent
-  endpoints, pending/status data.
+- [x] Clone and local migration.
+- [ ] Remote migration, resize and move disk, selected agent endpoints,
+  pending/status data.
 - [ ] Persist normalized CPU/memory/common fields plus unknown PVE parameters in
   JSONB; simulate usage, uptime, PID, IO/network, lock, template, QMP, HA and
   guest-agent availability.

@@ -322,6 +322,69 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
     async def snapshot_rollback(request: Request, inputs: dict[str, Any]) -> str:
         return await snapshot_task("snapshot-rollback", request, inputs)
 
+    async def clone(request: Request, inputs: dict[str, Any]) -> str:
+        values = _values(inputs)
+        node, vmid, newid = str(values["node"]), str(values["vmid"]), str(values["newid"])
+        source = await _qemu_resource(request, node, vmid)
+        if await _database(request).pool.fetchval(
+            """SELECT EXISTS(SELECT 1 FROM resources
+            WHERE external_id=$1 AND kind IN ('qemu','lxc'))""",
+            newid,
+        ):
+            raise ApiError(409, "VMID already exists")
+        target = str(values.get("target") or node)
+        if not await _database(request).pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE name=$1)", target
+        ):
+            raise ApiError(404, "target node does not exist")
+        return await _create_task(
+            request,
+            node=target,
+            vmid=newid,
+            task_type="qemu-clone",
+            payload={
+                "source_resource_id": str(source["id"]),
+                "source_vmid": vmid,
+                "node": target,
+                "vmid": int(newid),
+                "name": values.get("name"),
+                "description": values.get("description"),
+                "full": bool(values.get("full", False)),
+            },
+        )
+
+    async def migrate_preconditions(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        values = _values(inputs)
+        await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
+        target = str(values["target"])
+        exists = await _database(request).pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE name=$1)", target
+        )
+        if not exists:
+            raise ApiError(404, "target node does not exist")
+        return {"local_disks": [], "local_resources": [], "running": False}
+
+    async def migrate(request: Request, inputs: dict[str, Any]) -> str:
+        values = _values(inputs)
+        node, vmid, target = str(values["node"]), str(values["vmid"]), str(values["target"])
+        resource = await _qemu_resource(request, node, vmid)
+        if target == node:
+            raise ApiError(400, "target node is the same as source node")
+        await migrate_preconditions(request, inputs)
+        return await _create_task(
+            request,
+            node=node,
+            vmid=vmid,
+            task_type="qemu-migrate",
+            payload={
+                "resource_id": str(resource["id"]),
+                "node": node,
+                "target": target,
+                "vmid": vmid,
+                "online": bool(values.get("online", False)),
+            },
+        )
+
     async def task_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         tasks = await TaskRepository(_database(request).pool).list_for_node(
             str(_values(inputs)["node"])
@@ -382,6 +445,9 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
     registry.register(
         "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback", "POST", snapshot_rollback
     )
+    registry.register("/nodes/{node}/qemu/{vmid}/clone", "POST", clone)
+    registry.register("/nodes/{node}/qemu/{vmid}/migrate", "GET", migrate_preconditions)
+    registry.register("/nodes/{node}/qemu/{vmid}/migrate", "POST", migrate)
     registry.register("/nodes/{node}/tasks", "GET", task_list)
     registry.register("/nodes/{node}/tasks/{upid}/status", "GET", task_status)
     registry.register("/nodes/{node}/tasks/{upid}/log", "GET", task_log)
@@ -405,6 +471,8 @@ async def _create_task(
         "qemu-snapshot-create": "qmsnapshot",
         "qemu-snapshot-delete": "qmdelsnapshot",
         "qemu-snapshot-rollback": "qmrollback",
+        "qemu-clone": "qmclone",
+        "qemu-migrate": "qmigrate",
     }[task_type]
     upid = str(Upid(node, pid, pid, timestamp, worker_type, vmid, str(request.state.principal)))
     try:
