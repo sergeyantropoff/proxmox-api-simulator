@@ -46,7 +46,7 @@ services:
     image: nginx:1.28.0-alpine
     depends_on:
       simulator:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "8007:8443"
     volumes:

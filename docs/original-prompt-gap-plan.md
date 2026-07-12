@@ -29,7 +29,7 @@ live admin report renders the same evidence deterministically.
   LXC, disks, NICs, snapshots, backups, pools, users/groups/roles/ACLs/tokens and
   observed contracts. Preserve version, metadata, timestamps, and cluster-wide
   VMID uniqueness.
-- [ ] Make migration readiness explicit so workers cannot become permanently
+- [x] Make migration readiness explicit so workers cannot become permanently
   unhealthy before schema creation.
 - [x] Match the required `small` profile (one node, two QEMU, one LXC, two
   storages, administrator, completed tasks).

@@ -67,7 +67,10 @@ response, state, task, error, and permission dimensions.
 
 Database migrations are ordered SQL files applied transactionally and recorded
 with SHA-256 checksums. Re-running `make db-migrate` is safe; changing an already
-applied migration is rejected instead of silently drifting the schema.
+applied migration is rejected instead of silently drifting the schema. Readiness
+stays unavailable until the latest packaged migration is present; task workers
+retry claims and recover automatically when migrations are applied after process
+startup.
 Seed profiles are deterministic and replace the previously seeded simulation
 state atomically. `small` creates one node, two QEMU guests, one LXC, two
 storages, an administrator, and completed task history. `medium` creates three

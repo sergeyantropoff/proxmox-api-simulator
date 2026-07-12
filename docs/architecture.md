@@ -197,6 +197,12 @@ The first vertical release deliberately supports a small set of endpoints with
 complete stateful semantics. All other imported endpoints remain visibly
 unsupported until their handlers and compatibility tests exist.
 
+Database readiness includes the latest packaged migration version, not merely a
+successful connectivity query. Workers tolerate the documented container-first
+startup sequence by retrying failed claims until migration tables exist.
+Normalized resource writes use compare-and-swap version updates through a typed
+repository, so stale writers receive a domain conflict.
+
 ## Deployment model
 
 One Uvicorn process runs per container. Horizontal replicas coordinate through
