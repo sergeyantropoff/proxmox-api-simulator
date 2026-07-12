@@ -24,7 +24,12 @@ cp .env.example .env
 make docker-up
 curl http://localhost:8006/health/live
 curl http://localhost:8006/health/ready
+make db-migrate
 ```
+
+Database migrations are ordered SQL files applied transactionally and recorded
+with SHA-256 checksums. Re-running `make db-migrate` is safe; changing an already
+applied migration is rejected instead of silently drifting the schema.
 
 Contract artifacts can be validated and imported into immutable local revisions:
 
