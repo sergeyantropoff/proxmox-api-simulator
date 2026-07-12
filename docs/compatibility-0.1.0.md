@@ -9,8 +9,8 @@ Proxmox compatibility.
 | Level | Methods | Contract share | Evidence |
 |---|---:|---:|---|
 | Declared and dynamically routed | 675 | 100% | Imported immutable API Viewer artifact |
-| Stateful semantics implemented on current main | 18 | 2.67% | Handler registry and unit/integration tests |
-| Schema-only or explicitly unsupported | 657 | 97.33% | Default 501 fallback |
+| Stateful semantics implemented on current main | 22 | 3.26% | Handler registry and unit/integration tests |
+| Schema-only or explicitly unsupported | 653 | 96.74% | Default 501 fallback |
 | proxmoxer smoke exercised | 9 | 1.33% | Unmodified proxmoxer 2.3 compatibility test |
 
 The smoke set is `POST /access/ticket`, `GET /version`, `GET /nodes`,

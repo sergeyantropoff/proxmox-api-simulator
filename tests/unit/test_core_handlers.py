@@ -29,7 +29,10 @@ class FakePool:
                     "id": uuid.UUID("00000000-0000-0000-0000-000000000100"),
                     "state": '{"name":"demo","status":"stopped"}',
                 }
-            return {"state": '{"name":"demo","status":"stopped"}'}
+            return {
+                "config": '{"name":"demo"}',
+                "state": '{"name":"demo","status":"stopped"}',
+            }
         return None
 
     async def fetch(self, sql: str, *args: object) -> list[dict[str, object]]:

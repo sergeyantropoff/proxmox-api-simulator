@@ -2,6 +2,7 @@
 
 import os
 from threading import Event
+from typing import Any, cast
 
 import pytest
 from proxmoxer import ProxmoxAPI, ResourceException  # type: ignore[import-untyped]
@@ -10,6 +11,15 @@ pytestmark = [
     pytest.mark.compatibility,
     pytest.mark.skipif(not os.getenv("PROXMOXER_HOST"), reason="running TLS simulator required"),
 ]
+
+
+def wait_task(proxmox: Any, upid: str) -> dict[str, object]:
+    for _attempt in range(100):
+        task = proxmox.nodes("pve1").tasks(upid).status.get()
+        if task["status"] == "stopped":
+            return cast(dict[str, object], task)
+        Event().wait(0.05)
+    raise AssertionError("task did not finish")
 
 
 def test_proxmoxer_read_and_qemu_task_flow() -> None:
@@ -83,6 +93,29 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
             storage_api.nodes("pve1").qemu(vmid).config.get()
         assert hidden.value.status_code == 403
 
+    create_upid = proxmox.nodes("pve1").qemu.post(
+        vmid=150, name="created-by-proxmoxer", cores=2, memory=1024
+    )
+    with pytest.raises(ResourceException) as duplicate_create:
+        proxmox.nodes("pve1").qemu.post(vmid=150, name="duplicate")
+    assert duplicate_create.value.status_code == 409
+    assert wait_task(proxmox, create_upid)["exitstatus"] == "OK"
+    created_config = proxmox.nodes("pve1").qemu("150").config.get()
+    assert created_config["name"] == "created-by-proxmoxer"
+    assert created_config["cores"] == 2
+
+    assert proxmox.nodes("pve1").qemu("150").config.put(name="sync-update", cores=3) is None
+    assert proxmox.nodes("pve1").qemu("150").config.get()["name"] == "sync-update"
+    update_upid = proxmox.nodes("pve1").qemu("150").config.post(name="async-update", memory=2048)
+    assert wait_task(proxmox, update_upid)["exitstatus"] == "OK"
+    assert proxmox.nodes("pve1").qemu("150").config.get()["name"] == "async-update"
+
+    delete_upid = proxmox.nodes("pve1").qemu("150").delete()
+    assert wait_task(proxmox, delete_upid)["exitstatus"] == "OK"
+    with pytest.raises(ResourceException) as deleted_vm:
+        proxmox.nodes("pve1").qemu("150").config.get()
+    assert deleted_vm.value.status_code == 404
+
     if os.getenv("PROXMOXER_MUTATION_TEST") == "1":
         operator_api = ProxmoxAPI(
             os.environ["PROXMOXER_HOST"],
@@ -96,10 +129,5 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
         operation = "start" if status["status"] == "stopped" else "stop"
         endpoint = operator_api.nodes("pve1").qemu("101").status(operation)
         upid = endpoint.post()
-        for _attempt in range(100):
-            task = operator_api.nodes("pve1").tasks(upid).status.get()
-            if task["status"] == "stopped":
-                break
-            Event().wait(0.05)
-        assert task["status"] == "stopped"
+        task = wait_task(operator_api, upid)
         assert task["exitstatus"] == "OK"
