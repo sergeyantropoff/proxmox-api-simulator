@@ -357,11 +357,28 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
             ["Sys.Audit", "VM.Audit"],
         )
         await connection.execute(
-            """INSERT INTO acl_entries(principal_id, role_name, path, propagate)
-            VALUES($1, 'PVEAuditor', '/', true)
-            ON CONFLICT (principal_id, role_name, path) DO UPDATE
-            SET propagate=EXCLUDED.propagate""",
+            "DELETE FROM acl_entries WHERE principal_id=$1 AND role_name='PVEAuditor'",
             auditor_id,
+        )
+        auditor_group_id = stable_id("group:auditors")
+        await connection.execute(
+            """INSERT INTO identity_groups(id, group_id, comment)
+            VALUES($1, 'auditors', 'Read-only operators')
+            ON CONFLICT (group_id) DO UPDATE SET comment=EXCLUDED.comment""",
+            auditor_group_id,
+        )
+        await connection.execute(
+            """INSERT INTO identity_group_members(group_id, principal_id)
+            VALUES($1, $2) ON CONFLICT DO NOTHING""",
+            auditor_group_id,
+            auditor_id,
+        )
+        await connection.execute(
+            """INSERT INTO group_acl_entries(group_id, role_name, path, propagate)
+            VALUES($1, 'PVEAuditor', '/', true)
+            ON CONFLICT (group_id, role_name, path) DO UPDATE
+            SET propagate=EXCLUDED.propagate""",
+            auditor_group_id,
         )
         await connection.execute(
             """INSERT INTO api_tokens(principal_id, token_id, secret_hash, privileges)
@@ -372,6 +389,60 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
             hash_secret("readonly-secret", salt=b"pve-readonly-v1"),
             ["Sys.Audit", "VM.Audit"],
         )
+        for username, role_name, privileges, acl_path, token_id, token_secret in (
+            (
+                "operator@pve",
+                "PVEVMOperator",
+                ["VM.Audit", "VM.PowerMgmt"],
+                "/vms",
+                "operator",
+                "operator-secret",
+            ),
+            (
+                "storage@pve",
+                "PVEStorageUser",
+                ["Datastore.Audit", "Datastore.AllocateSpace"],
+                "/storage",
+                "storage",
+                "storage-secret",
+            ),
+        ):
+            principal_id = stable_id(f"principal:{username}")
+            await connection.execute(
+                """INSERT INTO principals(id, name, password_hash, realm_name)
+                VALUES($1, $2, $3, 'pve')
+                ON CONFLICT (name) DO UPDATE SET password_hash=EXCLUDED.password_hash,
+                realm_name=EXCLUDED.realm_name""",
+                principal_id,
+                username,
+                hash_secret(f"{username}-password", salt=f"seed:{username}".encode()),
+            )
+            await connection.execute(
+                """INSERT INTO roles(name, privileges) VALUES($1, $2)
+                ON CONFLICT (name) DO UPDATE SET privileges=EXCLUDED.privileges""",
+                role_name,
+                privileges,
+            )
+            await connection.execute(
+                """INSERT INTO acl_entries(principal_id, role_name, path, propagate)
+                VALUES($1, $2, $3, true)
+                ON CONFLICT (principal_id, role_name, path) DO UPDATE
+                SET propagate=EXCLUDED.propagate""",
+                principal_id,
+                role_name,
+                acl_path,
+            )
+            await connection.execute(
+                """INSERT INTO api_tokens(principal_id, token_id, secret_hash, privileges)
+                VALUES($1, $2, $3, $4)
+                ON CONFLICT (principal_id, token_id) DO UPDATE
+                SET secret_hash=EXCLUDED.secret_hash, privileges=EXCLUDED.privileges,
+                privilege_separation=true""",
+                principal_id,
+                token_id,
+                hash_secret(token_secret, salt=f"token:{username}".encode()),
+                privileges,
+            )
 
 
 async def seed_url(

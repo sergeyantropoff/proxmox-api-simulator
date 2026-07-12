@@ -45,9 +45,9 @@ large seeding proves bounded batch operations rather than row-at-a-time inserts.
   `PVEAPIToken=USER@REALM!TOKENID=SECRET` without CSRF.
 - [x] Complete pam, pve, and test realm behavior, ticket skew/expiry and
   credential redaction.
-- [ ] Wire users, groups, roles, ACL propagation, route-derived permissions and
+- [x] Wire users, groups, roles, ACL propagation, route-derived permissions and
   token privilege separation into every semantic handler.
-- [ ] Test root, audit-only, VM operator, storage user, separated token,
+- [x] Test root, audit-only, VM operator, storage user, separated token,
   inheritance, denial, and existence-hiding behavior.
 
 Exit: the complete credential/permission matrix passes through HTTP and no

@@ -60,6 +60,14 @@ async def test_small_seed_is_idempotent() -> None:
         assert await connection.fetchval("SELECT count(*) FROM containers") == 1
         assert await connection.fetchval("SELECT count(*) FROM storages") == 2
         assert await connection.fetchval("SELECT count(*) FROM storage_contents") == 4
+        assert await connection.fetchval("SELECT count(*) FROM identity_groups") == 1
+        assert await connection.fetchval("SELECT count(*) FROM identity_group_members") == 1
+        assert await connection.fetchval("SELECT count(*) FROM group_acl_entries") == 1
+        assert await connection.fetchval("SELECT count(*) FROM roles") == 3
+        assert await connection.fetchval("SELECT count(*) FROM api_tokens") == 4
+        secrets = await connection.fetch("SELECT secret_hash FROM api_tokens")
+        assert all(str(row["secret_hash"]).startswith("scrypt$") for row in secrets)
+        assert all("-secret" not in str(row["secret_hash"]) for row in secrets)
     finally:
         await connection.close()
 

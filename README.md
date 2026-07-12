@@ -63,6 +63,12 @@ work, while QEMU power operations return 403. API-token requests do not require
 CSRF; ticket-authenticated mutations still do. These are disposable local test
 credentials only.
 
+The permission acceptance matrix additionally seeds an audit-only user through
+an inherited group ACL, a VM operator, and a storage-scoped user. Compatibility
+tests verify root access, inherited `Sys.Audit`/`VM.Audit`, operator power
+management, token privilege intersection, denial, and identical denial for an
+existing and a nonexistent VM when the principal lacks `VM.Audit`.
+
 Token lifecycle is available at
 `/access/users/{userid}/token[/{tokenid}]`. A generated secret is returned only
 by create or explicit regenerate; only its scrypt hash is stored. List/read never
