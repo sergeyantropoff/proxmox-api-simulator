@@ -125,9 +125,19 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
             token_value=os.getenv("PROXMOXER_OPERATOR_TOKEN_SECRET", "operator-secret"),
             verify_ssl=False,
         )
-        status = operator_api.nodes("pve1").qemu("101").status.current.get()
-        operation = "start" if status["status"] == "stopped" else "stop"
-        endpoint = operator_api.nodes("pve1").qemu("101").status(operation)
-        upid = endpoint.post()
-        task = wait_task(operator_api, upid)
-        assert task["exitstatus"] == "OK"
+        status_resource = operator_api.nodes("pve1").qemu("101").status
+
+        def run(operation: str, expected: str) -> None:
+            upid = status_resource(operation).post()
+            assert wait_task(operator_api, upid)["exitstatus"] == "OK"
+            assert status_resource.current.get()["status"] == expected
+
+        if status_resource.current.get()["status"] == "stopped":
+            run("start", "running")
+        run("reboot", "running")
+        run("reset", "running")
+        run("suspend", "paused")
+        run("resume", "running")
+        run("shutdown", "stopped")
+        run("start", "running")
+        run("stop", "stopped")

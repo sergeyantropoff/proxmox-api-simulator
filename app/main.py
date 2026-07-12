@@ -46,8 +46,13 @@ def create_app(
                 {
                     "qemu-create": handler,
                     "qemu-delete": handler,
+                    "qemu-reboot": handler,
+                    "qemu-reset": handler,
+                    "qemu-resume": handler,
+                    "qemu-shutdown": handler,
                     "qemu-start": handler,
                     "qemu-stop": handler,
+                    "qemu-suspend": handler,
                     "qemu-update": handler,
                 },
                 concurrency=resolved.task_worker_concurrency,

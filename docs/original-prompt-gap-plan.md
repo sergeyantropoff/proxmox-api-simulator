@@ -56,7 +56,7 @@ plaintext password, ticket, CSRF token, or token secret reaches storage/logs.
 ## G4 — QEMU 0.2 verticals
 
 - [x] Create, synchronous/asynchronous update, and delete.
-- [ ] Shutdown, reboot, reset, suspend and resume.
+- [x] Shutdown, reboot, reset, suspend and resume.
 - [ ] Snapshots and rollback, clone, local/remote migration, resize and move
   disk, selected agent endpoints, pending/status data.
 - [ ] Persist normalized CPU/memory/common fields plus unknown PVE parameters in

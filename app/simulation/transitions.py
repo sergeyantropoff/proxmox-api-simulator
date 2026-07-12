@@ -29,6 +29,10 @@ class InvalidTransitionError(ValueError):
 TRANSITIONS: dict[tuple[VmState, str], tuple[VmState, VmState]] = {
     (VmState.STOPPED, "start"): (VmState.STARTING, VmState.RUNNING),
     (VmState.RUNNING, "stop"): (VmState.STOPPING, VmState.STOPPED),
+    (VmState.RUNNING, "shutdown"): (VmState.STOPPING, VmState.STOPPED),
+    (VmState.RUNNING, "reboot"): (VmState.STOPPING, VmState.RUNNING),
+    (VmState.RUNNING, "reset"): (VmState.STOPPING, VmState.RUNNING),
+    (VmState.RUNNING, "suspend"): (VmState.PAUSING, VmState.PAUSED),
     (VmState.RUNNING, "pause"): (VmState.PAUSING, VmState.PAUSED),
     (VmState.PAUSED, "resume"): (VmState.RESUMING, VmState.RUNNING),
     (VmState.RUNNING, "migrate"): (VmState.MIGRATING, VmState.RUNNING),
