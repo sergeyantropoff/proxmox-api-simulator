@@ -68,6 +68,23 @@ def test_unknown_schema_fields_are_retained() -> None:
     assert snapshot.paths[0].methods[0].returns.extra["futureKeyword"] == {"x": 1}
 
 
+def test_nullable_source_collections_normalize_as_empty() -> None:
+    raw = (
+        b'[{"path":"/nullable","info":{"GET":{"parameters":{"properties":null},'
+        b'"returns":{"type":"string","enum":null}}}}]'
+    )
+    snapshot, _ = normalize_snapshot(
+        ApiViewerParser().parse(raw),
+        raw=raw,
+        source_version="test",
+        retrieved_at=RETRIEVED_AT,
+    )
+
+    method = snapshot.paths[0].methods[0]
+    assert method.parameters == ()
+    assert method.returns.enum == ()
+
+
 @given(st.dictionaries(st.text(min_size=1), st.integers(), max_size=10))
 def test_canonical_json_is_independent_of_mapping_order(values: dict[str, int]) -> None:
     reversed_values = dict(reversed(tuple(values.items())))

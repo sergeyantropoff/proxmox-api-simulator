@@ -44,7 +44,11 @@ async def request_app(
     snapshot_path.write_bytes(contract_snapshot(get_method()).canonical_bytes())
     settings = Settings(contract_snapshot=snapshot_path, contract_fallback=fallback)
     database = FakeDatabase(True)
-    app = create_app(settings, lambda _settings: database, handlers)
+    app = create_app(
+        settings,
+        lambda _settings: database,
+        handlers if handlers is not None else HandlerRegistry(),
+    )
     async with app.router.lifespan_context(app):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             json_response = await client.get("/api2/json/version")

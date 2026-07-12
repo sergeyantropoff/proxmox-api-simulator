@@ -10,6 +10,7 @@ from app.api.registry import HandlerRegistry, register_contract_routes
 from app.compatibility import build_report
 from app.config import Settings, get_settings
 from app.contracts.model import Snapshot
+from app.handlers.core import build_core_handlers
 from app.lifespan import DatabaseFactory, WorkerFactory, create_lifespan, default_database_factory
 from app.logging import configure_logging
 from app.observability.health import router as health_router
@@ -36,7 +37,7 @@ def create_app(
     app.include_router(health_router)
     if resolved.contract_snapshot is not None:
         snapshot = Snapshot.model_validate_json(resolved.contract_snapshot.read_bytes())
-        resolved_handlers = handlers or HandlerRegistry()
+        resolved_handlers = handlers or build_core_handlers(resolved)
         register_contract_routes(
             app,
             snapshot,

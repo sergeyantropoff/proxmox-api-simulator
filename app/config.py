@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     request_id_header: str = "X-Request-ID"
     contract_snapshot: Path | None = None
     contract_fallback: Literal["error", "schema-default", "fixture"] = "error"
+    ticket_signing_key: SecretStr = SecretStr("development-only-signing-key-change-me")
 
 
 @lru_cache(maxsize=1)
