@@ -31,9 +31,9 @@ live admin report renders the same evidence deterministically.
   VMID uniqueness.
 - [ ] Make migration readiness explicit so workers cannot become permanently
   unhealthy before schema creation.
-- [ ] Match the required `small` profile (one node, two QEMU, one LXC, two
+- [x] Match the required `small` profile (one node, two QEMU, one LXC, two
   storages, administrator, completed tasks).
-- [ ] Implement deterministic `medium`, configurable batch-insert `large`,
+- [x] Implement deterministic `medium`, configurable batch-insert `large`,
   `ha-demo`, and `broken-storage` profiles.
 
 Exit: clean migration plus every seed profile has a stable logical snapshot;

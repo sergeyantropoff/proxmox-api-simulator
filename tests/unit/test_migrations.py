@@ -33,3 +33,20 @@ def test_repository_migration_defines_required_planes() -> None:
         assert f"CREATE TABLE {table}" in migration.sql
     assert "CREATE TABLE realms" in migrations[1].sql
     assert "CREATE TABLE api_tokens" in migrations[1].sql
+    domain = migrations[3].sql
+    for table in (
+        "clusters",
+        "virtual_machines",
+        "containers",
+        "storages",
+        "storage_contents",
+        "snapshots",
+        "backups",
+        "pools",
+        "identity_groups",
+        "contract_paths",
+        "observed_contracts",
+        "scenario_rules",
+        "fault_injections",
+    ):
+        assert f"CREATE TABLE {table}" in domain

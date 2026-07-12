@@ -43,15 +43,18 @@ async def test_small_seed_is_idempotent() -> None:
         await migrate(connection)
         await apply_seed(connection, small_profile())
         await apply_seed(connection, small_profile())
-        assert (
-            await connection.fetchval("SELECT count(*) FROM nodes WHERE name IN ('pve1', 'pve2')")
-            == 2
-        )
+        assert await connection.fetchval("SELECT count(*) FROM nodes WHERE name = 'pve1'") == 1
         assert (
             await connection.fetchval(
-                "SELECT count(*) FROM resources WHERE external_id IN ('100', 'local')"
+                """SELECT count(*) FROM resources
+                WHERE external_id IN ('100', '101', '200', 'local', 'local-lvm')"""
             )
-            == 2
+            == 5
         )
+        assert await connection.fetchval("SELECT count(*) FROM tasks WHERE status = 'success'") == 2
+        assert await connection.fetchval("SELECT count(*) FROM virtual_machines") == 2
+        assert await connection.fetchval("SELECT count(*) FROM containers") == 1
+        assert await connection.fetchval("SELECT count(*) FROM storages") == 2
+        assert await connection.fetchval("SELECT count(*) FROM storage_contents") == 4
     finally:
         await connection.close()
