@@ -84,6 +84,8 @@ class CrudConnection:
             return {"state": '{"status":"stopped","name":"old"}', "config": '{"name":"old"}'}
         if "SELECT state FROM resources" in sql:
             return {"state": '{"status":"stopped","name":"old"}'}
+        if "SELECT config FROM virtual_machines" in sql:
+            return {"config": '{"scsi0":"local-lvm:vm-150-disk-0,size=10G"}'}
         if "FROM snapshots" in sql:
             return {
                 "state": (
@@ -255,9 +257,28 @@ async def test_qemu_worker_clone_and_migrate_are_persistent() -> None:
             1,
         )
     )
+    moved = await handler(
+        Task(
+            uuid.uuid4(),
+            "UPID:move",
+            "qemu-move-disk",
+            "running",
+            {
+                "resource_id": str(resource_id),
+                "disk": "scsi0",
+                "target_disk": "scsi0",
+                "storage": "local",
+                "delete": True,
+            },
+            0,
+            False,
+            1,
+        )
+    )
 
     assert cloned == {"vmid": 151, "node": "pve1"}
     assert migrated == {"node": "pve2", "status": "stopped"}
+    assert moved == {"disk": "scsi0", "storage": "local"}
     commands = repository.connection.commands
     assert any("INSERT INTO resources" in command for command in commands)
     assert any("node_id=$2" in command for command in commands)

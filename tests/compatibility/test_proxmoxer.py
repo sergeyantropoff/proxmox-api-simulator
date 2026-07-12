@@ -94,7 +94,11 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
         assert hidden.value.status_code == 403
 
     create_upid = proxmox.nodes("pve1").qemu.post(
-        vmid=150, name="created-by-proxmoxer", cores=2, memory=1024
+        vmid=150,
+        name="created-by-proxmoxer",
+        cores=2,
+        memory=1024,
+        scsi0="local-lvm:vm-150-disk-0,size=8G",
     )
     with pytest.raises(ResourceException) as duplicate_create:
         proxmox.nodes("pve1").qemu.post(vmid=150, name="duplicate")
@@ -109,6 +113,13 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     update_upid = proxmox.nodes("pve1").qemu("150").config.post(name="async-update", memory=2048)
     assert wait_task(proxmox, update_upid)["exitstatus"] == "OK"
     assert proxmox.nodes("pve1").qemu("150").config.get()["name"] == "async-update"
+
+    disk_api = proxmox.nodes("pve1").qemu("150")
+    assert disk_api.resize.put(disk="scsi0", size="+2G") is None
+    assert "size=10G" in disk_api.config.get()["scsi0"]
+    move_upid = disk_api.move_disk.post(disk="scsi0", storage="local")
+    assert wait_task(proxmox, move_upid)["exitstatus"] == "OK"
+    assert disk_api.config.get()["scsi0"].startswith("local:")
 
     snapshots = proxmox.nodes("pve1").qemu("150").snapshot
     snapshot_upid = snapshots.post(snapname="baseline", description="before change")

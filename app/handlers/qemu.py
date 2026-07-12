@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -385,6 +386,61 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
             },
         )
 
+    async def resize(request: Request, inputs: dict[str, Any]) -> None:
+        values = _values(inputs)
+        node, vmid, disk = str(values["node"]), str(values["vmid"]), str(values["disk"])
+        resource = await _qemu_resource(request, node, vmid)
+        config = _state(resource["config"])
+        if disk not in config:
+            raise ApiError(400, f"disk {disk} does not exist")
+        current = _disk_size_bytes(str(config[disk]))
+        size = _resize_bytes(str(values["size"]), current)
+        config[disk] = _replace_disk_size(str(config[disk]), size)
+        status = await _database(request).pool.execute(
+            """UPDATE virtual_machines SET config=$2::jsonb
+            WHERE resource_id=$1""",
+            resource["id"],
+            json.dumps(config, sort_keys=True),
+        )
+        if status != "UPDATE 1":
+            raise ApiError(409, "configuration changed concurrently")
+        await _database(request).pool.execute(
+            """UPDATE resources SET state=state || $2::jsonb,version=version+1,
+            updated_at=now() WHERE id=$1""",
+            resource["id"],
+            json.dumps({disk: config[disk]}, sort_keys=True),
+        )
+        await _database(request).pool.execute(
+            """INSERT INTO vm_disks(id,resource_id,device,storage_id,size_bytes)
+            VALUES(gen_random_uuid(),$1,$2,$3,$4)
+            ON CONFLICT(resource_id,device) DO UPDATE SET size_bytes=EXCLUDED.size_bytes""",
+            resource["id"],
+            disk,
+            str(config[disk]).split(":", 1)[0],
+            size,
+        )
+
+    async def move_disk(request: Request, inputs: dict[str, Any]) -> str:
+        values = _values(inputs)
+        node, vmid, disk = str(values["node"]), str(values["vmid"]), str(values["disk"])
+        resource = await _qemu_resource(request, node, vmid)
+        if disk not in _state(resource["config"]):
+            raise ApiError(400, f"disk {disk} does not exist")
+        return await _create_task(
+            request,
+            node=node,
+            vmid=vmid,
+            task_type="qemu-move-disk",
+            payload={
+                "resource_id": str(resource["id"]),
+                "disk": disk,
+                "storage": str(values.get("storage") or "local-lvm"),
+                "target_vmid": int(values.get("target-vmid") or vmid),
+                "target_disk": str(values.get("target-disk") or disk),
+                "delete": bool(values.get("delete", True)),
+            },
+        )
+
     async def task_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         tasks = await TaskRepository(_database(request).pool).list_for_node(
             str(_values(inputs)["node"])
@@ -448,6 +504,8 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
     registry.register("/nodes/{node}/qemu/{vmid}/clone", "POST", clone)
     registry.register("/nodes/{node}/qemu/{vmid}/migrate", "GET", migrate_preconditions)
     registry.register("/nodes/{node}/qemu/{vmid}/migrate", "POST", migrate)
+    registry.register("/nodes/{node}/qemu/{vmid}/resize", "PUT", resize)
+    registry.register("/nodes/{node}/qemu/{vmid}/move_disk", "POST", move_disk)
     registry.register("/nodes/{node}/tasks", "GET", task_list)
     registry.register("/nodes/{node}/tasks/{upid}/status", "GET", task_status)
     registry.register("/nodes/{node}/tasks/{upid}/log", "GET", task_log)
@@ -473,6 +531,7 @@ async def _create_task(
         "qemu-snapshot-rollback": "qmrollback",
         "qemu-clone": "qmclone",
         "qemu-migrate": "qmigrate",
+        "qemu-move-disk": "qmmove",
     }[task_type]
     upid = str(Upid(node, pid, pid, timestamp, worker_type, vmid, str(request.state.principal)))
     try:
@@ -514,3 +573,36 @@ async def _snapshot(request: Request, values: dict[str, Any]) -> Any:
     if row is None:
         raise ApiError(404, "snapshot does not exist")
     return row
+
+
+_SIZE_RE = re.compile(r"^(?P<value>\d+)(?P<unit>[KMGT]?)$", re.IGNORECASE)
+
+
+def _size_bytes(value: str) -> int:
+    match = _SIZE_RE.fullmatch(value.strip())
+    if match is None:
+        raise ApiError(400, f"invalid disk size: {value}")
+    units = {"": 1, "K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}
+    return int(match.group("value")) * units[match.group("unit").upper()]
+
+
+def _disk_size_bytes(value: str) -> int:
+    for part in value.split(","):
+        if part.startswith("size="):
+            return _size_bytes(part.removeprefix("size="))
+    return 0
+
+
+def _resize_bytes(value: str, current: int) -> int:
+    if value.startswith("+"):
+        return current + _size_bytes(value[1:])
+    result = _size_bytes(value)
+    if result < current:
+        raise ApiError(400, "shrinking disks is not supported")
+    return result
+
+
+def _replace_disk_size(value: str, size: int) -> str:
+    parts = [part for part in value.split(",") if not part.startswith("size=")]
+    parts.append(f"size={size // 2**30}G" if size % 2**30 == 0 else f"size={size}")
+    return ",".join(parts)

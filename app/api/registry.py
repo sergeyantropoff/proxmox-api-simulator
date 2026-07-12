@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
@@ -226,9 +227,16 @@ async def _parse_inputs(request: Request, method: Method) -> dict[str, Any]:
             supplied.update(dict(parse_qsl((await request.body()).decode())))
 
     definitions = {parameter.name: parameter.definition for parameter in method.parameters}
+    indexed = {
+        re.compile("^" + re.escape(name).replace(r"\[n\]", r"\d+") + "$"): definition
+        for name, definition in definitions.items()
+        if "[n]" in name
+    }
     errors: dict[str, str] = {}
     parsed: dict[str, Any] = {}
     for name, definition in definitions.items():
+        if "[n]" in name:
+            continue
         if name not in supplied:
             if definition.optional:
                 if definition.default is not None:
@@ -240,7 +248,18 @@ async def _parse_inputs(request: Request, method: Method) -> dict[str, Any]:
             parsed[name] = _coerce(supplied[name], definition)
         except (TypeError, ValueError) as exc:
             errors[name] = str(exc)
+    indexed_names: set[str] = set()
     for name in supplied.keys() - definitions.keys():
+        indexed_definition = next(
+            (candidate for pattern, candidate in indexed.items() if pattern.fullmatch(name)), None
+        )
+        if indexed_definition is not None:
+            indexed_names.add(name)
+            try:
+                parsed[name] = _coerce(supplied[name], indexed_definition)
+            except (TypeError, ValueError) as exc:
+                errors[name] = str(exc)
+    for name in supplied.keys() - definitions.keys() - indexed_names:
         if name not in request.path_params:
             errors[name] = "property is not defined in schema"
     if errors:
