@@ -8,6 +8,9 @@ import asyncpg  # type: ignore[import-untyped]
 from asyncpg import Pool
 
 from app.config import Settings
+from app.db.migrations import load_migrations
+
+LATEST_SCHEMA_VERSION = max(migration.version for migration in load_migrations())
 
 
 class Database(Protocol):
@@ -62,12 +65,18 @@ class AsyncpgDatabase:
             await pool.close()
 
     async def is_ready(self) -> bool:
-        """Check that PostgreSQL accepts a trivial query."""
+        """Check connectivity and that all packaged migrations are applied."""
 
         if self._pool is None:
             return False
         try:
-            return bool(await self._pool.fetchval("SELECT 1") == 1)
+            return bool(
+                await self._pool.fetchval(
+                    """SELECT COALESCE(max(version), 0) >= $1
+                    FROM schema_migrations""",
+                    LATEST_SCHEMA_VERSION,
+                )
+            )
         except asyncpg.PostgresError:
             return False
 

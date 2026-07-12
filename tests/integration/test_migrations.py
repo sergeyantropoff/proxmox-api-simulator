@@ -6,7 +6,11 @@ import uuid
 import asyncpg  # type: ignore[import-untyped]
 import pytest
 
+from app.config import Settings
 from app.db.migrations import migrate
+from app.db.pool import AsyncpgDatabase
+from app.db.primitives import ConflictError
+from app.db.repositories.resources import ResourceRepository
 from app.simulation.seed import apply_seed, small_profile
 
 pytestmark = [
@@ -57,4 +61,35 @@ async def test_small_seed_is_idempotent() -> None:
         assert await connection.fetchval("SELECT count(*) FROM storages") == 2
         assert await connection.fetchval("SELECT count(*) FROM storage_contents") == 4
     finally:
+        await connection.close()
+
+
+async def test_schema_readiness_and_optimistic_resource_repository() -> None:
+    url = os.environ["TEST_DATABASE_URL"]
+    connection = await asyncpg.connect(url)
+    database = AsyncpgDatabase(Settings(database_url=url))
+    try:
+        await migrate(connection)
+        await apply_seed(connection, small_profile())
+        await database.connect()
+        assert await database.is_ready()
+
+        repository = ResourceRepository(database.pool)
+        resource = await repository.get(kind="qemu", external_id="101")
+        assert resource is not None
+        updated = await repository.update_state(
+            resource.id,
+            expected_version=resource.version,
+            state={**resource.state, "status": "running"},
+        )
+        assert updated.version == resource.version + 1
+        assert updated.state["status"] == "running"
+        with pytest.raises(ConflictError):
+            await repository.update_state(
+                resource.id,
+                expected_version=resource.version,
+                state=resource.state,
+            )
+    finally:
+        await database.close()
         await connection.close()
