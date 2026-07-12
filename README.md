@@ -85,6 +85,9 @@ QEMU snapshots are durable PostgreSQL records. Create, delete, and rollback use
 UPID tasks and the same per-VM lock as other mutations; rollback restores both
 the captured VM configuration and runtime state. Snapshot listing, inspection,
 and description updates are available through the native Proxmox API paths.
+Full QEMU clones copy configuration into a new stopped VM, and local migration
+moves a VM between seeded nodes through an explicit migrating state. Both are
+durable UPID operations with VMID collision and target-node validation.
 
 Token lifecycle is available at
 `/access/users/{userid}/token[/{tokenid}]`. A generated secret is returned only

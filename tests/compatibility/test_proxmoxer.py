@@ -126,6 +126,19 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     assert wait_task(proxmox, snapshot_delete_upid)["exitstatus"] == "OK"
     assert not snapshots.get()
 
+    clone_upid = (
+        proxmox.nodes("pve1").qemu("150").clone.post(newid=151, name="clone-by-proxmoxer", full=1)
+    )
+    assert wait_task(proxmox, clone_upid)["exitstatus"] == "OK"
+    assert proxmox.nodes("pve1").qemu("151").config.get()["name"] == "clone-by-proxmoxer"
+    migration = proxmox.nodes("pve1").qemu("151").migrate
+    assert migration.get(target="pve2")["local_disks"] == []
+    migrate_upid = migration.post(target="pve2", online=0)
+    assert wait_task(proxmox, migrate_upid)["exitstatus"] == "OK"
+    assert proxmox.nodes("pve2").qemu("151").config.get()["name"] == "clone-by-proxmoxer"
+    clone_delete_upid = proxmox.nodes("pve2").qemu("151").delete()
+    assert wait_task(proxmox, clone_delete_upid)["exitstatus"] == "OK"
+
     delete_upid = proxmox.nodes("pve1").qemu("150").delete()
     assert wait_task(proxmox, delete_upid)["exitstatus"] == "OK"
     with pytest.raises(ResourceException) as deleted_vm:

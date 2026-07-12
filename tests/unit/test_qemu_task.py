@@ -82,6 +82,8 @@ class CrudConnection:
             return {"id": uuid.uuid4(), "cluster_id": uuid.uuid4()}
         if "JOIN virtual_machines" in sql:
             return {"state": '{"status":"stopped","name":"old"}', "config": '{"name":"old"}'}
+        if "SELECT state FROM resources" in sql:
+            return {"state": '{"status":"stopped","name":"old"}'}
         if "FROM snapshots" in sql:
             return {
                 "state": (
@@ -217,3 +219,45 @@ async def test_qemu_worker_snapshot_create_rollback_and_delete_are_persistent() 
     assert any("INSERT INTO snapshots" in command for command in commands)
     assert any("UPDATE virtual_machines" in command for command in commands)
     assert any("DELETE FROM snapshots" in command for command in commands)
+
+
+async def test_qemu_worker_clone_and_migrate_are_persistent() -> None:
+    repository = CrudRepository()
+    handler = qemu_handler(cast(TaskRepository, repository), cast(Clock, ImmediateClock()))
+    resource_id = uuid.uuid4()
+
+    cloned = await handler(
+        Task(
+            uuid.uuid4(),
+            "UPID:clone",
+            "qemu-clone",
+            "running",
+            {
+                "source_resource_id": str(resource_id),
+                "node": "pve1",
+                "vmid": 151,
+                "name": "clone",
+            },
+            0,
+            False,
+            1,
+        )
+    )
+    migrated = await handler(
+        Task(
+            uuid.uuid4(),
+            "UPID:migrate",
+            "qemu-migrate",
+            "running",
+            {"resource_id": str(resource_id), "target": "pve2"},
+            0,
+            False,
+            1,
+        )
+    )
+
+    assert cloned == {"vmid": 151, "node": "pve1"}
+    assert migrated == {"node": "pve2", "status": "stopped"}
+    commands = repository.connection.commands
+    assert any("INSERT INTO resources" in command for command in commands)
+    assert any("node_id=$2" in command for command in commands)
