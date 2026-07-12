@@ -25,6 +25,7 @@ services:
     environment:
       DATABASE_URL: postgresql://proxmox:proxmox@postgres:5432/proxmox_simulator
       CONTRACT_SNAPSHOT: /app/contracts/pve-9.2.3.json
+      COMPATIBILITY_EVIDENCE: /app/evidence/pve-9.2.3-0.1.0.json
     depends_on:
       postgres:
         condition: service_healthy

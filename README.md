@@ -60,6 +60,11 @@ Run the external-client smoke flow against the Compose network with
 `compatibility`. It covers login, reads, CSRF-protected mutation, and UPID task
 completion.
 
+Machine-readable evidence is served at `/admin/compatibility`; deterministic
+Markdown and HTML variants use `/admin/compatibility.md` and
+`/admin/compatibility.html`. Scores are separated across all 13 contract,
+response, state, task, error, and permission dimensions.
+
 Database migrations are ordered SQL files applied transactionally and recorded
 with SHA-256 checksums. Re-running `make db-migrate` is safe; changing an already
 applied migration is rejected instead of silently drifting the schema.
