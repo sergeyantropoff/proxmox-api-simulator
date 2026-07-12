@@ -88,6 +88,10 @@ and description updates are available through the native Proxmox API paths.
 Full QEMU clones copy configuration into a new stopped VM, and local migration
 moves a VM between seeded nodes through an explicit migrating state. Both are
 durable UPID operations with VMID collision and target-node validation.
+Indexed contract fields such as `scsi[n]` accept their concrete Proxmox names
+(`scsi0`, `scsi1`, and so on). QEMU disk growth is synchronous and rejects
+shrinking; disk moves are durable tasks that update normalized disk metadata and
+the preserved VM configuration.
 
 Token lifecycle is available at
 `/access/users/{userid}/token[/{tokenid}]`. A generated secret is returned only

@@ -31,6 +31,8 @@ def qemu_handler(repository: TaskRepository, clock: Clock) -> TaskHandler:
             )
         if operation == "migrate":
             return await _migrate(repository, task, resource_id, clock)
+        if operation == "move-disk":
+            return await _move_disk(repository, task, resource_id)
         async with repository.pool.acquire() as connection:
             row = await connection.fetchrow("SELECT state FROM resources WHERE id=$1", resource_id)
             if row is None:
@@ -276,6 +278,50 @@ async def _migrate(
         )
     await repository.append_log(task.id, f"migration to {target} completed")
     return {"node": target, "status": str(transition.after)}
+
+
+async def _move_disk(
+    repository: TaskRepository, task: Task, resource_id: uuid.UUID
+) -> dict[str, Any]:
+    disk = str(task.payload["disk"])
+    target_disk = str(task.payload["target_disk"])
+    storage = str(task.payload["storage"])
+    async with repository.pool.acquire() as connection:
+        async with connection.transaction():
+            row = await connection.fetchrow(
+                "SELECT config FROM virtual_machines WHERE resource_id=$1", resource_id
+            )
+            if row is None:
+                raise ValueError("resource disappeared")
+            config = _object(row["config"])
+            if disk not in config:
+                raise ValueError("disk disappeared")
+            original = str(config[disk])
+            suffix = original.split(":", 1)[1] if ":" in original else original
+            config[target_disk] = f"{storage}:{suffix}"
+            if bool(task.payload.get("delete", True)) and target_disk != disk:
+                config.pop(disk, None)
+            await connection.execute(
+                "UPDATE virtual_machines SET config=$2::jsonb WHERE resource_id=$1",
+                resource_id,
+                json.dumps(config, sort_keys=True),
+            )
+            await connection.execute(
+                """UPDATE resources SET state=state || $2::jsonb, version=version+1,
+                updated_at=now() WHERE id=$1""",
+                resource_id,
+                json.dumps({target_disk: config[target_disk]}, sort_keys=True),
+            )
+            await connection.execute(
+                """UPDATE vm_disks SET device=$2,storage_id=$3
+                WHERE resource_id=$1 AND device=$4""",
+                resource_id,
+                target_disk,
+                storage,
+                disk,
+            )
+    await repository.append_log(task.id, f"disk {disk} moved to {storage}")
+    return {"disk": target_disk, "storage": storage}
 
 
 def _object(value: object) -> dict[str, Any]:

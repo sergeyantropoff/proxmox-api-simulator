@@ -66,7 +66,11 @@ class QemuPool:
             return {"state": '{"status":"stopped"}', "config": '{"name":"vm"}'}
         if "SELECT r.id, r.state" in sql:
             status = "running" if self.running else "stopped"
-            return {"id": self.resource_id, "state": f'{{"status":"{status}"}}'}
+            return {
+                "id": self.resource_id,
+                "state": f'{{"status":"{status}"}}',
+                "config": '{"scsi0":"local-lvm:vm-150-disk-0,size=8G"}',
+            }
         if "SELECT r.id, r.state, v.config" in sql:
             return {"id": self.resource_id, "state": '{"status":"stopped"}', "config": "{}"}
         if "SELECT s.* FROM snapshots" in sql:
@@ -292,7 +296,9 @@ async def test_qemu_clone_and_migrate_handlers(monkeypatch: pytest.MonkeyPatch) 
     clone = registry.get("/nodes/{node}/qemu/{vmid}/clone", "POST")
     migrate_get = registry.get("/nodes/{node}/qemu/{vmid}/migrate", "GET")
     migrate = registry.get("/nodes/{node}/qemu/{vmid}/migrate", "POST")
-    assert clone and migrate_get and migrate
+    resize = registry.get("/nodes/{node}/qemu/{vmid}/resize", "PUT")
+    move = registry.get("/nodes/{node}/qemu/{vmid}/move_disk", "POST")
+    assert clone and migrate_get and migrate and resize and move
 
     clone_upid = await clone(
         http_request, inputs(node="pve1", vmid=150, newid=151, name="clone", full=True)
@@ -307,6 +313,14 @@ async def test_qemu_clone_and_migrate_handlers(monkeypatch: pytest.MonkeyPatch) 
     )
     assert migrate_upid.startswith("UPID:pve1:")
     assert tasks[-1]["task_type"] == "qemu-migrate"
+    assert (
+        await resize(http_request, inputs(node="pve1", vmid=150, disk="scsi0", size="+2G")) is None
+    )
+    move_upid = await move(
+        http_request, inputs(node="pve1", vmid=150, disk="scsi0", storage="local")
+    )
+    assert move_upid.startswith("UPID:pve1:")
+    assert tasks[-1]["task_type"] == "qemu-move-disk"
 
     with pytest.raises(ApiError) as same_node:
         await migrate(http_request, inputs(node="pve1", vmid=150, target="pve1"))

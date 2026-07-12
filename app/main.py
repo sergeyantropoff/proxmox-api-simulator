@@ -52,6 +52,7 @@ def create_app(
                     "qemu-resume": handler,
                     "qemu-shutdown": handler,
                     "qemu-migrate": handler,
+                    "qemu-move-disk": handler,
                     "qemu-snapshot-create": handler,
                     "qemu-snapshot-delete": handler,
                     "qemu-snapshot-rollback": handler,

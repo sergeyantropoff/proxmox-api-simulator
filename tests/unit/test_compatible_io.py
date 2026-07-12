@@ -23,6 +23,7 @@ async def client_for(tmp_path: Path) -> AsyncClient:
             Parameter(name="node", definition=Schema(type="string")),
             Parameter(name="count", definition=Schema(type="integer", minimum=1)),
             Parameter(name="force", definition=Schema(type="boolean", optional=True)),
+            Parameter(name="scsi[n]", definition=Schema(type="string", optional=True)),
         ),
         returns=Schema(type="null"),
         checksum="1" * 64,
@@ -41,6 +42,8 @@ async def client_for(tmp_path: Path) -> AsyncClient:
 
     async def handler(_request: Request, inputs: dict[str, Any]) -> None:
         assert inputs["values"]["count"] >= 1
+        if "scsi0" in inputs["values"]:
+            assert inputs["values"]["scsi0"] == "local:disk,size=8G"
         return None
 
     handlers.register("/nodes/{node}/test", "POST", handler)
@@ -96,3 +99,12 @@ async def test_non_object_json_is_rejected_without_fastapi_body(tmp_path: Path) 
     assert response.status_code == 400
     assert response.json()["errors"] == {"body": "expected an object"}
     assert "detail" not in response.json()
+
+
+async def test_indexed_contract_parameter_accepts_concrete_device(tmp_path: Path) -> None:
+    async with await client_for(tmp_path) as client:
+        response = await client.post(
+            "/api2/json/nodes/pve/test", json={"count": 1, "scsi0": "local:disk,size=8G"}
+        )
+
+    assert response.status_code == 200
