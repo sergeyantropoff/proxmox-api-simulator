@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import cast
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from app.api.errors import ApiError, api_error_handler, unhandled_exception_handler
 from app.api.middleware import RequestContextMiddleware
 from app.api.registry import HandlerRegistry, register_contract_routes
-from app.compatibility import build_report
+from app.compatibility import CompatibilityDimension, build_report, load_evidence_manifest
 from app.config import Settings, get_settings
 from app.contracts.model import Snapshot
 from app.db.pool import AsyncpgDatabase, Database
@@ -71,11 +71,30 @@ def create_app(
         declared = frozenset(
             (path.path, method.verb) for path in snapshot.paths for method in path.methods
         )
-        report = build_report(snapshot, implemented=resolved_handlers.keys() & declared)
+        dimensions = {CompatibilityDimension.ROUTE_METHOD: declared}
+        if resolved.compatibility_evidence is not None:
+            evidence = load_evidence_manifest(resolved.compatibility_evidence)
+            if evidence.source_version != snapshot.source_version:
+                raise ValueError("compatibility evidence version does not match contract")
+            dimensions.update(evidence.dimension_map())
+            dimensions[CompatibilityDimension.ROUTE_METHOD] = declared
+        report = build_report(
+            snapshot,
+            implemented=resolved_handlers.keys() & declared,
+            dimensions=dimensions,
+        )
 
         @app.get("/admin/compatibility", include_in_schema=False)
         async def compatibility_report() -> dict[str, object]:
             return report.as_json()
+
+        @app.get("/admin/compatibility.md", include_in_schema=False)
+        async def compatibility_report_markdown() -> Response:
+            return Response(report.as_markdown(), media_type="text/markdown")
+
+        @app.get("/admin/compatibility.html", include_in_schema=False)
+        async def compatibility_report_html() -> Response:
+            return Response(report.as_html(), media_type="text/html")
 
     return app
 

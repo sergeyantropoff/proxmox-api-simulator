@@ -1,0 +1,55 @@
+{
+  "format_version": 1,
+  "profile": "pve-9.2",
+  "source_version": "9.2.3",
+  "records": [
+    {
+      "path": "/version",
+      "verb": "GET",
+      "dimensions": ["http_status", "json_structure", "response_field_types", "response_required_fields"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_core_handlers.py"]
+    },
+    {
+      "path": "/access/ticket",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "response_field_types", "response_required_fields", "headers_cookies", "errors_prohibitions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_auth.py", "tests/unit/test_dynamic_routes.py"]
+    },
+    {
+      "path": "/nodes",
+      "verb": "GET",
+      "dimensions": ["http_status", "json_structure", "response_field_types", "response_required_fields", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_core_handlers.py", "tests/unit/test_acl.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "response_field_types", "response_required_fields", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_core_handlers.py", "tests/unit/test_acl.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/status/current",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "response_field_types", "response_required_fields", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_core_handlers.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/status/start",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "headers_cookies", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_task.py", "tests/unit/test_transitions.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/status/stop",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "headers_cookies", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_task.py", "tests/unit/test_transitions.py"]
+    },
+    {
+      "path": "/nodes/{node}/tasks/{upid}/status",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "response_field_types", "response_required_fields", "long_task_behavior", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_task_worker.py", "tests/unit/test_upid.py"]
+    }
+  ]
+}

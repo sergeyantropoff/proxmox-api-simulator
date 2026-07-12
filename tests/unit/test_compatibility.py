@@ -1,10 +1,11 @@
 """Compatibility accounting tests."""
 
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
-from app.compatibility import build_report
+from app.compatibility import CompatibilityDimension, EvidenceManifest, build_report
 from app.contracts.model import Method, PathContract, Schema, Snapshot
 
 
@@ -54,3 +55,58 @@ def test_report_scores_levels_and_groups_independently() -> None:
 def test_report_rejects_unbound_evidence() -> None:
     with pytest.raises(ValueError, match="undeclared"):
         build_report(snapshot(), verified=frozenset({("/missing", "GET")}))
+
+
+def test_all_thirteen_dimensions_have_independent_evidence_and_renderers() -> None:
+    method = frozenset({("/nodes/{node}", "GET")})
+    report = build_report(
+        snapshot(),
+        implemented=method,
+        dimensions={dimension: method for dimension in CompatibilityDimension},
+    )
+
+    payload = report.as_json()
+    dimensions = cast(dict[str, dict[str, object]], payload["dimensions"])
+    assert list(dimensions) == [dimension.value for dimension in CompatibilityDimension]
+    assert len(dimensions) == 13
+    assert all(item["count"] == 1 for item in dimensions.values())
+    assert payload["dimension_groups"]
+    classifications = cast(dict[str, list[str]], payload["classifications"])
+    assert classifications["fully_compatible"] == ["GET /nodes/{node}"]
+    assert not classifications["partially_compatible"]
+    assert "| permissions | 1 |" in report.as_markdown()
+    assert "<td>long_task_behavior</td><td>1</td>" in report.as_html()
+    assert report.canonical_json() == report.canonical_json()
+
+
+def test_dimension_evidence_must_reference_declared_method() -> None:
+    with pytest.raises(ValueError, match="permissions evidence"):
+        build_report(
+            snapshot(),
+            dimensions={CompatibilityDimension.PERMISSIONS: frozenset({("/missing", "GET")})},
+        )
+
+
+def test_evidence_manifest_requires_provenance_and_unique_methods() -> None:
+    manifest = EvidenceManifest.model_validate(
+        {
+            "profile": "pve-9.2",
+            "source_version": "9.2.3",
+            "records": [
+                {
+                    "path": "/nodes/{node}",
+                    "verb": "GET",
+                    "dimensions": ["http_status", "json_structure"],
+                    "sources": ["tests/compatibility/test_proxmoxer.py"],
+                }
+            ],
+        }
+    )
+    evidence = manifest.dimension_map()
+    assert evidence[CompatibilityDimension.HTTP_STATUS] == frozenset({("/nodes/{node}", "GET")})
+    assert not evidence[CompatibilityDimension.PERMISSIONS]
+
+    duplicate = manifest.model_dump(mode="json")
+    duplicate["records"].append(duplicate["records"][0])
+    with pytest.raises(ValueError, match="duplicate methods"):
+        EvidenceManifest.model_validate(duplicate)

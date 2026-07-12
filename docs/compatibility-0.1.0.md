@@ -43,3 +43,11 @@ worker tests; a single smoke run chooses the transition valid for current state.
 The live `/admin/compatibility` endpoint is the machine-readable source for
 declared and implemented counts. Unsupported methods remain failures by default
 so the simulator cannot silently overstate compatibility.
+
+The report also exposes the 13 independent compatibility dimensions required by
+the project brief. Evidence is loaded from the immutable
+`evidence/pve-9.2.3-0.1.0.json` manifest, where every method/dimension claim cites
+the tests that support it. Dynamic route registration itself proves only the
+route/method dimension; it does not imply semantic compatibility. Markdown and
+HTML renderings are available at `/admin/compatibility.md` and
+`/admin/compatibility.html`.

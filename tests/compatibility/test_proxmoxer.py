@@ -1,7 +1,7 @@
 """Unmodified proxmoxer HTTPS smoke flow."""
 
 import os
-import time
+from threading import Event
 
 import pytest
 from proxmoxer import ProxmoxAPI  # type: ignore[import-untyped]
@@ -34,6 +34,6 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
             task = proxmox.nodes("pve1").tasks(upid).status.get()
             if task["status"] == "stopped":
                 break
-            time.sleep(0.05)
+            Event().wait(0.05)
         assert task["status"] == "stopped"
         assert task["exitstatus"] == "OK"

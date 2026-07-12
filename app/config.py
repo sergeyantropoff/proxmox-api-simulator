@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     request_id_header: str = "X-Request-ID"
     contract_snapshot: Path | None = None
+    compatibility_evidence: Path | None = None
     contract_fallback: Literal["error", "schema-default", "fixture"] = "error"
     ticket_signing_key: SecretStr = SecretStr("development-only-signing-key-change-me")
     task_worker_concurrency: int = Field(default=2, ge=1, le=32)
