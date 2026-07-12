@@ -57,3 +57,14 @@ The fixture is not a complete snapshot and must never be used to claim broad
 Proxmox compatibility. Full imports should preserve the immutable raw
 `apidoc.js`, response metadata, retrieval timestamp, and checksum outside the
 small test-fixture path.
+
+## Parser boundary
+
+`app.contracts.source.ApiViewerParser` accepts either the saved JSON sample or
+the official JavaScript wrapper. It locates the exact `const apiSchema`
+assignment, scans the balanced JSON value while respecting escaped strings, and
+decodes only that value; no downloaded JavaScript is evaluated. Recoverable
+tree variations produce structured warnings and unknown node fields remain in
+the parsed dictionaries. `SourceImporter` and `LocalFileImporter` keep artifact
+retrieval separate from parsing so later remote imports can enforce their own
+network policy.
