@@ -55,6 +55,14 @@ print(proxmox.version.get())
 print(proxmox.nodes("pve1").qemu.get())
 ```
 
+The deterministic seed also provides hashed development API tokens. For token
+authentication use proxmoxer `token_name="automation"` and
+`token_value="automation-secret"` with user `root@pam`. The readonly
+`auditor@pve!readonly` token proves privilege separation: authenticated reads
+work, while QEMU power operations return 403. API-token requests do not require
+CSRF; ticket-authenticated mutations still do. These are disposable local test
+credentials only.
+
 Run the external-client smoke flow against the Compose network with
 `PROXMOXER_HOST=tls-gateway`, `PROXMOXER_PORT=8443`, and pytest marker
 `compatibility`. It covers login, reads, CSRF-protected mutation, and UPID task

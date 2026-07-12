@@ -332,6 +332,46 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
             stable_id("principal:root@pam"),
             hash_secret("secret", salt=b"pve-simulator-v1"),
         )
+        await connection.execute(
+            """INSERT INTO api_tokens(principal_id, token_id, secret_hash, privileges)
+            VALUES($1, 'automation', $2, $3)
+            ON CONFLICT (principal_id, token_id) DO UPDATE
+            SET secret_hash=EXCLUDED.secret_hash, privileges=EXCLUDED.privileges""",
+            stable_id("principal:root@pam"),
+            hash_secret("automation-secret", salt=b"pve-token-seed-v1"),
+            ["VM.Audit", "VM.PowerMgmt", "Sys.Audit"],
+        )
+        auditor_id = stable_id("principal:auditor@pve")
+        await connection.execute(
+            """INSERT INTO principals(id, name, password_hash, realm_name)
+            VALUES($1, 'auditor@pve', $2, 'pve')
+            ON CONFLICT (name) DO UPDATE SET password_hash=EXCLUDED.password_hash,
+            realm_name=EXCLUDED.realm_name""",
+            auditor_id,
+            hash_secret("auditor-secret", salt=b"pve-auditor-v1"),
+        )
+        await connection.execute(
+            """INSERT INTO roles(name, privileges)
+            VALUES('PVEAuditor', $1)
+            ON CONFLICT (name) DO UPDATE SET privileges=EXCLUDED.privileges""",
+            ["Sys.Audit", "VM.Audit"],
+        )
+        await connection.execute(
+            """INSERT INTO acl_entries(principal_id, role_name, path, propagate)
+            VALUES($1, 'PVEAuditor', '/', true)
+            ON CONFLICT (principal_id, role_name, path) DO UPDATE
+            SET propagate=EXCLUDED.propagate""",
+            auditor_id,
+        )
+        await connection.execute(
+            """INSERT INTO api_tokens(principal_id, token_id, secret_hash, privileges)
+            VALUES($1, 'readonly', $2, $3)
+            ON CONFLICT (principal_id, token_id) DO UPDATE
+            SET secret_hash=EXCLUDED.secret_hash, privileges=EXCLUDED.privileges""",
+            auditor_id,
+            hash_secret("readonly-secret", salt=b"pve-readonly-v1"),
+            ["Sys.Audit", "VM.Audit"],
+        )
 
 
 async def seed_url(
