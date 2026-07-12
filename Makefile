@@ -63,7 +63,7 @@ db-down: ## Stop PostgreSQL
 	$(COMPOSE) stop postgres
 
 db-migrate: ## Apply database migrations
-	@echo "Database migrations are scheduled for milestone D1" >&2; exit 2
+	$(BIN)/python -m app.db.migrate_cli
 
 db-reset: ## Recreate the local database volume
 	$(COMPOSE) down -v
