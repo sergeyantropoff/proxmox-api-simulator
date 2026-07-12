@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
+from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.api.errors import ContractValidationError
 from app.contracts.model import Method, Schema, Snapshot
 
 Handler = Callable[[Request, dict[str, Any]], Awaitable[Any]]
@@ -75,10 +77,7 @@ def _endpoint(
 ) -> Callable[[Request], Awaitable[JSONResponse]]:
     async def dispatch(request: Request) -> JSONResponse:
         handler = handlers.get(semantic_path, method.verb)
-        inputs = {
-            "path": dict(request.path_params),
-            "query": dict(request.query_params),
-        }
+        inputs = await _parse_inputs(request, method)
         if handler is not None:
             data = await handler(request, inputs)
         elif fallback == "schema-default":
@@ -95,6 +94,78 @@ def _endpoint(
         return JSONResponse({"data": data})
 
     return dispatch
+
+
+async def _parse_inputs(request: Request, method: Method) -> dict[str, Any]:
+    supplied: dict[str, Any] = dict(request.query_params)
+    supplied.update(request.path_params)
+    if request.method not in {"GET", "DELETE"}:
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
+        if content_type == "application/json":
+            try:
+                body = await request.json()
+            except ValueError as exc:
+                raise ContractValidationError({"body": "invalid JSON"}) from exc
+            if not isinstance(body, dict):
+                raise ContractValidationError({"body": "expected an object"})
+            supplied.update(body)
+        elif content_type == "application/x-www-form-urlencoded":
+            supplied.update(dict(parse_qsl((await request.body()).decode())))
+
+    definitions = {parameter.name: parameter.definition for parameter in method.parameters}
+    errors: dict[str, str] = {}
+    parsed: dict[str, Any] = {}
+    for name, definition in definitions.items():
+        if name not in supplied:
+            if definition.optional:
+                if definition.default is not None:
+                    parsed[name] = definition.default
+                continue
+            errors[name] = "property is missing and it is not optional"
+            continue
+        try:
+            parsed[name] = _coerce(supplied[name], definition)
+        except (TypeError, ValueError) as exc:
+            errors[name] = str(exc)
+    for name in supplied.keys() - definitions.keys():
+        if name not in request.path_params:
+            errors[name] = "property is not defined in schema"
+    if errors:
+        raise ContractValidationError(dict(sorted(errors.items())))
+    return {"values": parsed, "path": dict(request.path_params)}
+
+
+def _coerce(value: Any, schema: Schema) -> Any:
+    if schema.type == "integer":
+        parsed: Any = int(value)
+    elif schema.type == "number":
+        parsed = float(value)
+    elif schema.type == "boolean":
+        if isinstance(value, bool):
+            parsed = value
+        elif str(value).lower() in {"1", "true", "yes", "on"}:
+            parsed = True
+        elif str(value).lower() in {"0", "false", "no", "off"}:
+            parsed = False
+        else:
+            raise ValueError("expected a boolean")
+    elif schema.type == "string" or schema.type is None:
+        parsed = str(value)
+    else:
+        parsed = value
+    if schema.enum and parsed not in schema.enum:
+        raise ValueError("value is not in the allowed enumeration")
+    if isinstance(parsed, int | float):
+        if schema.minimum is not None and parsed < schema.minimum:
+            raise ValueError(f"value must be at least {schema.minimum}")
+        if schema.maximum is not None and parsed > schema.maximum:
+            raise ValueError(f"value must be at most {schema.maximum}")
+    if isinstance(parsed, str):
+        if schema.min_length is not None and len(parsed) < schema.min_length:
+            raise ValueError(f"value is shorter than {schema.min_length}")
+        if schema.max_length is not None and len(parsed) > schema.max_length:
+            raise ValueError(f"value is longer than {schema.max_length}")
+    return parsed
 
 
 def _schema_default(schema: Schema) -> Any:

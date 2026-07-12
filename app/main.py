@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app.api.errors import unhandled_exception_handler
+from app.api.errors import ApiError, api_error_handler, unhandled_exception_handler
 from app.api.middleware import RequestContextMiddleware
 from app.api.registry import HandlerRegistry, register_contract_routes
 from app.config import Settings, get_settings
@@ -30,6 +30,7 @@ def create_app(
     )
     app.add_middleware(RequestContextMiddleware, header_name=resolved.request_id_header)
     app.add_exception_handler(Exception, unhandled_exception_handler)
+    app.add_exception_handler(ApiError, api_error_handler)
     app.include_router(health_router)
     if resolved.contract_snapshot is not None:
         snapshot = Snapshot.model_validate_json(resolved.contract_snapshot.read_bytes())
