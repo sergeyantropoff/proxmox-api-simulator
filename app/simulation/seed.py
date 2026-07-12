@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import asyncpg  # type: ignore[import-untyped]
 from asyncpg import Connection
 
+from app.security.auth import hash_secret
+
 NAMESPACE = uuid.UUID("c9040a72-b391-4a7e-9864-3ae46291a531")
 
 
@@ -88,6 +90,14 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
                 )
                 for resource in profile.resources
             ],
+        )
+        await connection.execute(
+            """INSERT INTO principals(id, name, password_hash, realm_name)
+            VALUES($1, 'root@pam', $2, 'pam')
+            ON CONFLICT (name) DO UPDATE SET password_hash=EXCLUDED.password_hash,
+            realm_name=EXCLUDED.realm_name""",
+            stable_id("principal:root@pam"),
+            hash_secret("secret", salt=b"pve-simulator-v1"),
         )
 
 

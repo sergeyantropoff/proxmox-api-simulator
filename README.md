@@ -8,6 +8,11 @@ Imported methods can be registered dynamically, but no stateful Proxmox method
 is claimed as compatible yet; the vertical slice is tracked in
 [the implementation plan](docs/implementation-plan.md).
 
+The bundled PVE 9.2.3 declared contract contains 444 paths and 675 methods.
+Implemented semantics currently include version, ticket login, node listing and
+status, and cluster resources; all other declared methods return an explicit
+unsupported error.
+
 ## Development
 
 Python 3.13 is required.
@@ -26,6 +31,9 @@ curl http://localhost:8006/health/live
 curl http://localhost:8006/health/ready
 make db-migrate
 make seed
+curl http://localhost:8006/api2/json/version
+curl -X POST -d 'username=root@pam&password=secret' \
+  http://localhost:8006/api2/json/access/ticket
 ```
 
 Database migrations are ordered SQL files applied transactionally and recorded

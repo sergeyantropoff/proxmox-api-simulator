@@ -53,7 +53,7 @@ def _json(value: Any) -> JsonValue:
 
 def normalize_schema(raw: Mapping[str, Any] | None) -> Schema:
     source = raw or {}
-    properties = source.get("properties", {})
+    properties = source.get("properties") or {}
     normalized_properties = {
         str(name): normalize_schema(cast(Mapping[str, Any], schema))
         for name, schema in cast(Mapping[str, Any], properties).items()
@@ -67,7 +67,7 @@ def normalize_schema(raw: Mapping[str, Any] | None) -> Schema:
         items=normalize_schema(cast(Mapping[str, Any], items))
         if isinstance(items, Mapping)
         else None,
-        enum=tuple(_json(value) for value in source.get("enum", ())),
+        enum=tuple(_json(value) for value in (source.get("enum") or ())),
         optional=bool(source["optional"]) if "optional" in source else None,
         default=_json(source.get("default")),
         minimum=source.get("minimum"),
@@ -96,7 +96,7 @@ def normalize_permissions(raw: Mapping[str, Any] | None) -> Permissions | None:
 
 
 def normalize_method(verb: str, raw: Mapping[str, Any]) -> Method:
-    parameters_raw = cast(Mapping[str, Any], raw.get("parameters", {})).get("properties", {})
+    parameters_raw = cast(Mapping[str, Any], raw.get("parameters") or {}).get("properties") or {}
     parameters = tuple(
         Parameter(name=str(name), definition=normalize_schema(cast(Mapping[str, Any], schema)))
         for name, schema in sorted(cast(Mapping[str, Any], parameters_raw).items())
