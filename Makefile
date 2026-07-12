@@ -70,7 +70,7 @@ db-reset: ## Recreate the local database volume
 	$(COMPOSE) up -d postgres
 
 api-import: ## Import an API snapshot
-	@echo "API import is scheduled for milestone B4" >&2; exit 2
+	$(BIN)/proxmox-api-contract import $(ARGS)
 
 api-diff: ## Compare API snapshots
 	@echo "API diff is scheduled for milestone B5" >&2; exit 2
@@ -82,4 +82,3 @@ clean: ## Remove generated local artifacts
 	rm -rf $(VENV) .coverage coverage.xml htmlcov .mypy_cache .pytest_cache .ruff_cache
 
 ci: format lint typecheck coverage ## Run the complete local quality gate
-

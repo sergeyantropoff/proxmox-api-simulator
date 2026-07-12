@@ -26,7 +26,20 @@ curl http://localhost:8006/health/live
 curl http://localhost:8006/health/ready
 ```
 
+Contract artifacts can be validated and imported into immutable local revisions:
+
+```bash
+.venv/bin/proxmox-api-contract validate tests/fixtures/api-viewer/pve-9.2.3-version.json
+.venv/bin/proxmox-api-contract --store contracts import \
+  --file tests/fixtures/api-viewer/pve-9.2.3-version.json --version 9.2.3
+.venv/bin/proxmox-api-contract --store contracts list
+```
+
+Remote imports accept HTTPS URLs on the explicit official-domain allowlist and
+reject private address resolution, unsafe redirects, oversized responses, and
+unbounded retries. Imported revisions are addressed by their normalized
+snapshot checksum and are never overwritten.
+
 See [the architecture](docs/architecture.md) for component boundaries and
 durability decisions. Commands for not-yet-implemented milestones intentionally
 return a non-zero status instead of pretending to succeed.
-
