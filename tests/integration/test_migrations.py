@@ -7,6 +7,7 @@ import asyncpg  # type: ignore[import-untyped]
 import pytest
 
 from app.db.migrations import migrate
+from app.simulation.seed import apply_seed, small_profile
 
 pytestmark = [
     pytest.mark.integration,
@@ -32,5 +33,25 @@ async def test_migration_is_repeatable_and_constraints_hold() -> None:
                     uuid.uuid4(),
                     f"invalid-{node_id}",
                 )
+    finally:
+        await connection.close()
+
+
+async def test_small_seed_is_idempotent() -> None:
+    connection = await asyncpg.connect(os.environ["TEST_DATABASE_URL"])
+    try:
+        await migrate(connection)
+        await apply_seed(connection, small_profile())
+        await apply_seed(connection, small_profile())
+        assert (
+            await connection.fetchval("SELECT count(*) FROM nodes WHERE name IN ('pve1', 'pve2')")
+            == 2
+        )
+        assert (
+            await connection.fetchval(
+                "SELECT count(*) FROM resources WHERE external_id IN ('100', 'local')"
+            )
+            == 2
+        )
     finally:
         await connection.close()
