@@ -1,0 +1,3 @@
+name: proxmox-api-simulator
+runtime: python
+description: Lab cookbook against proxmox-api-simulator

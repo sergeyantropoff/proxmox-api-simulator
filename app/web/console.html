@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Proxmox API Emulator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: #121a2f;
+      --panel-2: #18233d;
+      --border: #2a3555;
+      --text: #e8eefc;
+      --muted: #93a0c0;
+      --accent: #5b8cff;
+      --accent-2: #3dd6c6;
+      --danger: #ff6b7a;
+      --ok: #4ade80;
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+      --radius: 16px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--sans);
+      background:
+        radial-gradient(circle at top left, rgba(91, 140, 255, 0.18), transparent 28%),
+        radial-gradient(circle at top right, rgba(61, 214, 198, 0.12), transparent 24%),
+        var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 20px 48px; }
+    header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      gap: 16px; margin-bottom: 28px;
+    }
+    h1 { margin: 0 0 8px; font-size: clamp(1.6rem, 2vw, 2.2rem); }
+    .subtitle { color: var(--muted); max-width: 56ch; line-height: 1.5; }
+    .links { display: flex; gap: 10px; flex-wrap: wrap; }
+    .links a {
+      color: var(--text); text-decoration: none; border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: 999px;
+      font-size: 0.92rem;
+    }
+    .grid {
+      display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent), var(--panel);
+      border: 1px solid var(--border); border-radius: var(--radius); padding: 18px;
+      box-shadow: var(--shadow);
+    }
+    .span-4 { grid-column: span 4; }
+    .span-5 { grid-column: span 5; }
+    .span-7 { grid-column: span 7; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+    @media (max-width: 900px) {
+      .span-4, .span-5, .span-7, .span-8 { grid-column: span 12; }
+    }
+    h2 { margin: 0 0 14px; font-size: 1rem; letter-spacing: 0.02em; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+    input, select, textarea, button {
+      width: 100%; font: inherit; border-radius: 12px; border: 1px solid var(--border);
+      background: var(--panel-2); color: var(--text); padding: 11px 12px;
+    }
+    textarea { min-height: 120px; font-family: var(--mono); font-size: 0.88rem; resize: vertical; }
+    button {
+      cursor: pointer; background: linear-gradient(135deg, var(--accent), #4068d8);
+      border: none; font-weight: 600; margin-top: 10px;
+    }
+    button.secondary {
+      background: transparent; border: 1px solid var(--border); font-weight: 500;
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .stat {
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 14px;
+      padding: 14px;
+    }
+    .stat .label { color: var(--muted); font-size: 0.82rem; margin-bottom: 6px; }
+    .stat .value { font-size: 1.25rem; font-weight: 700; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px;
+      border-radius: 999px; background: rgba(74, 222, 128, 0.12); color: var(--ok);
+      border: 1px solid rgba(74, 222, 128, 0.25); font-size: 0.85rem;
+    }
+    .pill.warn { color: #fbbf24; background: rgba(251, 191, 36, 0.12); border-color: rgba(251,191,36,0.25); }
+    pre {
+      margin: 0; padding: 14px; border-radius: 14px; background: #070b14;
+      border: 1px solid var(--border); overflow: auto; font-family: var(--mono);
+      font-size: 0.84rem; line-height: 1.45; min-height: 180px;
+    }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .actions button { width: auto; flex: 1 1 140px; margin-top: 0; }
+    .hint { color: var(--muted); font-size: 0.85rem; margin-top: 8px; line-height: 1.4; }
+    .error { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Proxmox API Emulator</h1>
+        <p class="subtitle">
+          Stateful API console for the emulator. Authenticate, inspect cluster state,
+          send requests, and follow UPID tasks against the same `/api2/json` surface
+          used by proxmoxer and other clients.
+        </p>
+      </div>
+      <div class="links">
+        <a href="/docs" target="_blank" rel="noreferrer">OpenAPI</a>
+        <a href="/admin/compatibility.html" target="_blank" rel="noreferrer">Compatibility</a>
+        <a href="/health/ready" target="_blank" rel="noreferrer">Readiness</a>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="card span-4">
+        <h2>Authentication</h2>
+        <label for="username">Username</label>
+        <input id="username" value="root@pam" autocomplete="username">
+        <label for="password">Password</label>
+        <input id="password" type="password" value="secret" autocomplete="current-password">
+        <button id="login-btn">Get ticket</button>
+        <p class="hint">Development credentials from the deterministic seed profile.</p>
+        <label for="csrf">CSRFPreventionToken</label>
+        <input id="csrf" readonly>
+        <div id="auth-status" class="pill warn" style="margin-top:12px;">Not authenticated</div>
+      </section>
+
+      <section class="card span-8">
+        <h2>Cluster snapshot</h2>
+        <div class="stats">
+          <div class="stat"><div class="label">PVE version</div><div class="value" id="stat-version">—</div></div>
+          <div class="stat"><div class="label">Nodes</div><div class="value" id="stat-nodes">—</div></div>
+          <div class="stat"><div class="label">Resources</div><div class="value" id="stat-resources">—</div></div>
+        </div>
+        <div class="actions" style="margin-top:14px;">
+          <button class="secondary" data-action="refresh">Refresh overview</button>
+          <button class="secondary" data-action="nodes">GET /nodes</button>
+          <button class="secondary" data-action="resources">GET /cluster/resources</button>
+        </div>
+      </section>
+
+      <section class="card span-5">
+        <h2>Quick request</h2>
+        <div class="row">
+          <div>
+            <label for="method">Method</label>
+            <select id="method">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>DELETE</option>
+            </select>
+          </div>
+          <div>
+            <label for="path">Path</label>
+            <input id="path" value="/api2/json/nodes/pve01/qemu">
+          </div>
+        </div>
+        <label for="body">Body (JSON or form key=value)</label>
+        <textarea id="body"></textarea>
+        <button id="send-btn">Send request</button>
+        <p class="hint">Mutating requests automatically attach the CSRF header when a ticket is present.</p>
+      </section>
+
+      <section class="card span-7">
+        <h2>Response</h2>
+        <pre id="output">Waiting for a request…</pre>
+      </section>
+
+      <section class="card span-12">
+        <h2>Task monitor</h2>
+        <div class="row">
+          <div>
+            <label for="node">Node</label>
+            <input id="node" value="pve01">
+          </div>
+          <div>
+            <label for="upid">UPID</label>
+            <input id="upid" placeholder="UPID returned by a mutation">
+          </div>
+        </div>
+        <div class="actions" style="margin-top:10px;">
+          <button class="secondary" id="task-status-btn">Task status</button>
+          <button class="secondary" id="task-log-btn">Task log</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const output = document.getElementById("output");
+    const csrfInput = document.getElementById("csrf");
+    const authStatus = document.getElementById("auth-status");
+
+    function show(data, status) {
+      output.textContent = JSON.stringify({ status, data }, null, 2);
+    }
+
+    async function apiFetch(path, options = {}) {
+      const headers = new Headers(options.headers || {});
+      if (csrfInput.value && options.method && options.method !== "GET") {
+        headers.set("CSRFPreventionToken", csrfInput.value);
+      }
+      const response = await fetch(path, { ...options, headers, credentials: "include" });
+      let data;
+      try { data = await response.json(); } catch { data = { raw: await response.text() }; }
+      show(data, response.status);
+      return { response, data };
+    }
+
+    async function refreshOverview() {
+      const version = await apiFetch("/api2/json/version");
+      document.getElementById("stat-version").textContent =
+        version.data?.data?.version || "unknown";
+      const nodes = await apiFetch("/api2/json/nodes");
+      const resources = await apiFetch("/api2/json/cluster/resources");
+      document.getElementById("stat-nodes").textContent =
+        Array.isArray(nodes.data?.data) ? nodes.data.data.length : "0";
+      document.getElementById("stat-resources").textContent =
+        Array.isArray(resources.data?.data) ? resources.data.data.length : "0";
+    }
+
+    document.getElementById("login-btn").addEventListener("click", async () => {
+      const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+      const body = new URLSearchParams({ username, password });
+      const result = await apiFetch("/api2/json/access/ticket", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      const ticket = result.data?.data;
+      if (ticket?.CSRFPreventionToken) {
+        csrfInput.value = ticket.CSRFPreventionToken;
+        authStatus.textContent = `Authenticated as ${ticket.username}`;
+        authStatus.classList.remove("warn");
+      } else {
+        authStatus.textContent = "Authentication failed";
+        authStatus.classList.add("warn");
+      }
+      await refreshOverview();
+    });
+
+    document.getElementById("send-btn").addEventListener("click", async () => {
+      const method = document.getElementById("method").value;
+      const path = document.getElementById("path").value;
+      const rawBody = document.getElementById("body").value.trim();
+      const options = { method };
+      if (rawBody && method !== "GET" && method !== "DELETE") {
+        if (rawBody.startsWith("{")) {
+          options.headers = { "Content-Type": "application/json" };
+          options.body = rawBody;
+        } else {
+          options.headers = { "Content-Type": "application/x-www-form-urlencoded" };
+          options.body = rawBody;
+        }
+      }
+      await apiFetch(path, options);
+    });
+
+    document.querySelector('[data-action="refresh"]').addEventListener("click", refreshOverview);
+    document.querySelector('[data-action="nodes"]').addEventListener("click", () =>
+      apiFetch("/api2/json/nodes"));
+    document.querySelector('[data-action="resources"]').addEventListener("click", () =>
+      apiFetch("/api2/json/cluster/resources"));
+
+    document.getElementById("task-status-btn").addEventListener("click", async () => {
+      const node = document.getElementById("node").value;
+      const upid = encodeURIComponent(document.getElementById("upid").value);
+      await apiFetch(`/api2/json/nodes/${node}/tasks/${upid}/status`);
+    });
+
+    document.getElementById("task-log-btn").addEventListener("click", async () => {
+      const node = document.getElementById("node").value;
+      const upid = encodeURIComponent(document.getElementById("upid").value);
+      await apiFetch(`/api2/json/nodes/${node}/tasks/${upid}/log`);
+    });
+
+    refreshOverview().catch((error) => {
+      output.textContent = String(error);
+      output.classList.add("error");
+    });
+  </script>
+</body>
+</html>

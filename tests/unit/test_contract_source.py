@@ -25,6 +25,14 @@ def test_extract_api_schema_without_executing_trailing_javascript() -> None:
     assert parsed.nodes[0]["path"] == "/x]y"
 
 
+def test_extract_legacy_pveapi_declaration() -> None:
+    raw = b'var pveapi = [{"path":"/version","leaf":1}];'
+
+    parsed = ApiViewerParser().parse(raw)
+
+    assert parsed.nodes[0]["path"] == "/version"
+
+
 @pytest.mark.parametrize(
     "raw, message",
     [

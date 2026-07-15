@@ -13,6 +13,7 @@ from app.api.errors import ApiError
 from app.api.registry import HandlerRegistry
 from app.db.pool import AsyncpgDatabase
 from app.db.primitives import ConflictError
+from app.handlers.common import require_node, subdirs
 from app.simulation.transitions import InvalidTransitionError, VmState, plan_transition
 from app.tasks.repository import TaskRepository
 from app.tasks.upid import Upid
@@ -43,6 +44,67 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
         )
         return [{"vmid": int(row["vmid"]), **_state(row["state"])} for row in rows]
 
+    async def qemu_status_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
+        payload = _values(inputs)
+        await _qemu_resource(request, str(payload["node"]), str(payload["vmid"]))
+        return subdirs(
+            "current",
+            "reboot",
+            "reset",
+            "resume",
+            "shutdown",
+            "start",
+            "stop",
+            "suspend",
+        )
+
+    async def qemu_status_current(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        payload = _values(inputs)
+        node, vmid = str(payload["node"]), int(payload["vmid"])
+        resource = await _qemu_resource(request, node, str(vmid))
+        vm_state = _state(resource["state"])
+        config = _state(resource["config"])
+        status = str(vm_state.get("status", "stopped"))
+        running = status in {"running", "paused"}
+        memory_mb = int(config.get("memory", config.get("mem", 2048)))
+        maxmem = memory_mb * 2**20
+        mem_used = int(vm_state.get("mem", maxmem // 2 if running else 0))
+        uptime = int(
+            vm_state.get(
+                "uptime",
+                int(
+                    await _database(request).pool.fetchval(
+                        "SELECT extract(epoch from now())::bigint"
+                    )
+                )
+                % 86_400
+                if running
+                else 0,
+            )
+        )
+        return {
+            "vmid": vmid,
+            "name": str(config.get("name", f"vm-{vmid}")),
+            "status": status,
+            "qmpstatus": status if running else "stopped",
+            "lock": str(vm_state.get("lock", "")),
+            "pid": int(vm_state.get("pid", 12_345 if running else 0)),
+            "cpus": int(config.get("cores", config.get("cpus", 1))),
+            "maxmem": maxmem,
+            "mem": mem_used,
+            "balloon": int(vm_state.get("balloon", 0)),
+            "ballooninfo": {
+                "actual": mem_used,
+                "max_mem": maxmem,
+                "mem_swapped_in": 0,
+                "mem_swapped_out": 0,
+            },
+            "uptime": uptime,
+            "template": int(bool(vm_state.get("template", False))),
+            "ha": {"managed": int(vm_state.get("ha_managed", 0))},
+            "agent": 1 if running and str(config.get("agent", "0")).startswith("1") else 0,
+        }
+
     async def qemu_config(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         node, vmid = str(_values(inputs)["node"]), str(_values(inputs)["vmid"])
         row = await _database(request).pool.fetchrow(
@@ -56,9 +118,6 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
         if row is None:
             raise ApiError(404, "virtual machine does not exist")
         return {"vmid": int(vmid), **_state(row["config"]), **_state(row["state"])}
-
-    async def qemu_status(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
-        return await qemu_config(request, inputs)
 
     async def mutate(operation: str, request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)
@@ -77,26 +136,17 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
             plan_transition(VmState(current), operation)
         except (InvalidTransitionError, ValueError) as error:
             raise ApiError(409, f"cannot {operation} VM while it is {current}") from error
-        timestamp = int(await database.pool.fetchval("SELECT extract(epoch from now())::bigint"))
-        pid = int(await database.pool.fetchval("SELECT pg_backend_pid()"))
-        upid = str(
-            Upid(
-                node,
-                pid,
-                pid,
-                timestamp,
-                f"qm{operation}",
-                vmid,
-                str(request.state.principal),
+        upid = str(Upid.allocate(node, f"qm{operation}", vmid, str(request.state.principal)))
+        try:
+            task = await TaskRepository(database.pool).create(
+                upid=upid,
+                task_type=f"qemu-{operation}",
+                payload={"node": node, "vmid": vmid, "resource_id": str(row["id"])},
+                resource_key=f"qemu:{vmid}",
+                idempotency_key=request.headers.get("Idempotency-Key"),
             )
-        )
-        task = await TaskRepository(database.pool).create(
-            upid=upid,
-            task_type=f"qemu-{operation}",
-            payload={"node": node, "vmid": vmid, "resource_id": str(row["id"])},
-            resource_key=f"qemu:{vmid}",
-            idempotency_key=request.headers.get("Idempotency-Key"),
-        )
+        except ConflictError as error:
+            raise ApiError(409, str(error)) from error
         return task.upid
 
     async def create(request: Request, inputs: dict[str, Any]) -> str:
@@ -357,7 +407,10 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
     async def migrate_preconditions(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         values = _values(inputs)
         await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
-        target = str(values["target"])
+        target = values.get("target")
+        if target in {None, ""}:
+            raise ApiError(400, "parameter 'target' is required")
+        target = str(target)
         exists = await _database(request).pool.fetchval(
             "SELECT EXISTS(SELECT 1 FROM nodes WHERE name=$1)", target
         )
@@ -367,7 +420,11 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
 
     async def migrate(request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)
-        node, vmid, target = str(values["node"]), str(values["vmid"]), str(values["target"])
+        node, vmid = str(values["node"]), str(values["vmid"])
+        target = values.get("target")
+        if target in {None, ""}:
+            raise ApiError(400, "parameter 'target' is required")
+        target = str(target)
         resource = await _qemu_resource(request, node, vmid)
         if target == node:
             raise ApiError(400, "target node is the same as source node")
@@ -382,6 +439,37 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
                 "node": node,
                 "target": target,
                 "vmid": vmid,
+                "online": bool(values.get("online", False)),
+            },
+        )
+
+    async def remote_migrate(request: Request, inputs: dict[str, Any]) -> str:
+        values = _values(inputs)
+        target_endpoint = str(values.get("target-endpoint") or values.get("target_endpoint") or "")
+        target = str(values.get("target") or "")
+        if not target_endpoint:
+            raise ApiError(400, "parameter target-endpoint is required")
+        if not target:
+            raise ApiError(400, "parameter target is required")
+        node, vmid = str(values["node"]), str(values["vmid"])
+        resource = await _qemu_resource(request, node, vmid)
+        if target == node:
+            raise ApiError(400, "target node is the same as source node")
+        if not await _database(request).pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE name=$1)", target
+        ):
+            raise ApiError(404, "target node does not exist")
+        return await _create_task(
+            request,
+            node=node,
+            vmid=vmid,
+            task_type="qemu-remote-migrate",
+            payload={
+                "resource_id": str(resource["id"]),
+                "node": node,
+                "target": target,
+                "vmid": vmid,
+                "target-endpoint": target_endpoint,
                 "online": bool(values.get("online", False)),
             },
         )
@@ -441,6 +529,74 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
             },
         )
 
+    async def pending(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        values = _values(inputs)
+        resource = await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
+        state = _state(resource["state"])
+        config = _state(resource["config"])
+        changes = cast(Mapping[str, Any], state.get("pending", {}))
+        return [
+            {"key": key, "value": str(config.get(key, "")), "pending": str(value)}
+            for key, value in sorted(changes.items())
+        ]
+
+    async def agent_result(
+        command: str, request: Request, inputs: dict[str, Any]
+    ) -> dict[str, Any]:
+        resource = await _agent_resource(request, _values(inputs))
+        config = _state(resource["config"])
+        vmid = str(_values(inputs)["vmid"])
+        results: dict[str, Any] = {
+            "info": {
+                "version": "9.2.0-simulator",
+                "supported_commands": [
+                    {"name": name, "enabled": True, "success-response": True}
+                    for name in ("guest-ping", "guest-info", "guest-get-osinfo")
+                ],
+            },
+            "get-osinfo": {
+                "name": str(config.get("ostype", "linux")),
+                "pretty-name": "Proxmox Simulator Guest",
+                "version": "1.0",
+                "machine": "x86_64",
+            },
+            "get-host-name": {"host-name": str(config.get("name", f"vm-{vmid}"))},
+            "network-get-interfaces": [
+                {
+                    "name": "eth0",
+                    "hardware-address": "02:00:00:00:00:01",
+                    "ip-addresses": [
+                        {"ip-address": "192.0.2.10", "ip-address-type": "ipv4", "prefix": 24}
+                    ],
+                }
+            ],
+            "ping": {},
+        }
+        if command == "get-time":
+            seconds = int(
+                await _database(request).pool.fetchval("SELECT extract(epoch from now())::bigint")
+            )
+            return {"result": {"seconds": seconds, "nanoseconds": 0}}
+        return {"result": results[command]}
+
+    async def agent_info(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        return await agent_result("info", request, inputs)
+
+    async def agent_osinfo(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        return await agent_result("get-osinfo", request, inputs)
+
+    async def agent_hostname(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        return await agent_result("get-host-name", request, inputs)
+
+    async def agent_network(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        return await agent_result("network-get-interfaces", request, inputs)
+
+    async def agent_time(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        return await agent_result("get-time", request, inputs)
+
+    async def agent_ping(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        return await agent_result("ping", request, inputs)
+
     async def task_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         tasks = await TaskRepository(_database(request).pool).list_for_node(
             str(_values(inputs)["node"])
@@ -474,13 +630,87 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
             for index, message in enumerate(await repository.logs(task.id))
         ]
 
+    async def qemu_feature(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        payload = _values(inputs)
+        await _qemu_resource(request, str(payload["node"]), str(payload["vmid"]))
+        return {
+            "hasFeature": {
+                "snapshot": 1,
+                "clone": 1,
+                "copy": 1,
+                "template": 1,
+                "move_disk": 1,
+                "agent": 1,
+            }
+        }
+
+    async def qemu_template(request: Request, inputs: dict[str, Any]) -> None:
+        payload = _values(inputs)
+        node, vmid = str(payload["node"]), str(payload["vmid"])
+        resource = await _qemu_resource(request, node, vmid)
+        state = _state(resource["state"])
+        if state.get("status") != "stopped":
+            raise ApiError(409, "virtual machine must be stopped to convert to template")
+        await _database(request).pool.execute(
+            "UPDATE virtual_machines SET template=true WHERE resource_id=$1",
+            resource["id"],
+        )
+        state["template"] = True
+        await _database(request).pool.execute(
+            "UPDATE resources SET state=$2::jsonb WHERE id=$1",
+            resource["id"],
+            json.dumps(state, sort_keys=True),
+        )
+
+    async def qemu_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
+        payload = _values(inputs)
+        node, vmid = str(payload["node"]), str(payload["vmid"])
+        await require_node(request, node)
+        await _qemu_resource(request, node, vmid)
+        return subdirs(
+            "agent",
+            "clone",
+            "config",
+            "feature",
+            "firewall",
+            "migrate",
+            "move_disk",
+            "pending",
+            "resize",
+            "snapshot",
+            "status",
+            "template",
+        )
+
+    async def task_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
+        payload = _values(inputs)
+        node, upid = str(payload["node"]), str(payload["upid"])
+        await require_node(request, node)
+        task = await TaskRepository(_database(request).pool).get_by_upid(upid)
+        if task is None:
+            raise ApiError(404, "task does not exist")
+        return subdirs("log", "status")
+
+    async def task_delete(request: Request, inputs: dict[str, Any]) -> None:
+        payload = _values(inputs)
+        upid = str(payload["upid"])
+        repository = TaskRepository(_database(request).pool)
+        task = await repository.get_by_upid(upid)
+        if task is None:
+            raise ApiError(404, "task does not exist")
+        if task.status in {"success", "error", "cancelled"}:
+            return
+        await repository.request_cancel(task.id)
+
     registry.register("/nodes/{node}/qemu", "GET", qemu_list)
     registry.register("/nodes/{node}/qemu", "POST", create)
+    registry.register("/nodes/{node}/qemu/{vmid}", "GET", qemu_index)
     registry.register("/nodes/{node}/qemu/{vmid}", "DELETE", delete)
     registry.register("/nodes/{node}/qemu/{vmid}/config", "GET", qemu_config)
     registry.register("/nodes/{node}/qemu/{vmid}/config", "POST", update_async)
     registry.register("/nodes/{node}/qemu/{vmid}/config", "PUT", update_sync)
-    registry.register("/nodes/{node}/qemu/{vmid}/status/current", "GET", qemu_status)
+    registry.register("/nodes/{node}/qemu/{vmid}/status", "GET", qemu_status_index)
+    registry.register("/nodes/{node}/qemu/{vmid}/status/current", "GET", qemu_status_current)
     registry.register("/nodes/{node}/qemu/{vmid}/status/start", "POST", start)
     registry.register("/nodes/{node}/qemu/{vmid}/status/stop", "POST", stop)
     registry.register("/nodes/{node}/qemu/{vmid}/status/shutdown", "POST", shutdown)
@@ -504,11 +734,28 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
     registry.register("/nodes/{node}/qemu/{vmid}/clone", "POST", clone)
     registry.register("/nodes/{node}/qemu/{vmid}/migrate", "GET", migrate_preconditions)
     registry.register("/nodes/{node}/qemu/{vmid}/migrate", "POST", migrate)
+    registry.register("/nodes/{node}/qemu/{vmid}/remote_migrate", "POST", remote_migrate)
     registry.register("/nodes/{node}/qemu/{vmid}/resize", "PUT", resize)
     registry.register("/nodes/{node}/qemu/{vmid}/move_disk", "POST", move_disk)
+    registry.register("/nodes/{node}/qemu/{vmid}/pending", "GET", pending)
+    registry.register("/nodes/{node}/qemu/{vmid}/agent/info", "GET", agent_info)
+    registry.register("/nodes/{node}/qemu/{vmid}/agent/get-osinfo", "GET", agent_osinfo)
+    registry.register("/nodes/{node}/qemu/{vmid}/agent/get-host-name", "GET", agent_hostname)
+    registry.register(
+        "/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces", "GET", agent_network
+    )
+    registry.register("/nodes/{node}/qemu/{vmid}/agent/get-time", "GET", agent_time)
+    registry.register("/nodes/{node}/qemu/{vmid}/agent/ping", "POST", agent_ping)
+    registry.register("/nodes/{node}/qemu/{vmid}/feature", "GET", qemu_feature)
+    registry.register("/nodes/{node}/qemu/{vmid}/template", "POST", qemu_template)
     registry.register("/nodes/{node}/tasks", "GET", task_list)
+    registry.register("/nodes/{node}/tasks/{upid}", "GET", task_index)
+    registry.register("/nodes/{node}/tasks/{upid}", "DELETE", task_delete)
     registry.register("/nodes/{node}/tasks/{upid}/status", "GET", task_status)
     registry.register("/nodes/{node}/tasks/{upid}/log", "GET", task_log)
+    from app.handlers.qemu_extra import register_qemu_extra_handlers
+
+    register_qemu_extra_handlers(registry)
 
 
 async def _create_task(
@@ -520,8 +767,6 @@ async def _create_task(
     payload: dict[str, Any],
 ) -> str:
     database = _database(request)
-    timestamp = int(await database.pool.fetchval("SELECT extract(epoch from now())::bigint"))
-    pid = int(await database.pool.fetchval("SELECT pg_backend_pid()"))
     worker_type = {
         "qemu-create": "qmcreate",
         "qemu-delete": "qmdestroy",
@@ -531,9 +776,10 @@ async def _create_task(
         "qemu-snapshot-rollback": "qmrollback",
         "qemu-clone": "qmclone",
         "qemu-migrate": "qmigrate",
+        "qemu-remote-migrate": "qmremote",
         "qemu-move-disk": "qmmove",
     }[task_type]
-    upid = str(Upid(node, pid, pid, timestamp, worker_type, vmid, str(request.state.principal)))
+    upid = str(Upid.allocate(node, worker_type, vmid, str(request.state.principal)))
     try:
         task = await TaskRepository(database.pool).create(
             upid=upid,
@@ -573,6 +819,17 @@ async def _snapshot(request: Request, values: dict[str, Any]) -> Any:
     if row is None:
         raise ApiError(404, "snapshot does not exist")
     return row
+
+
+async def _agent_resource(request: Request, values: dict[str, Any]) -> Any:
+    resource = await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
+    config = _state(resource["config"])
+    state = _state(resource["state"])
+    if str(config.get("agent", "0")).split(",", 1)[0].lower() not in {"1", "true", "yes"}:
+        raise ApiError(409, "QEMU guest agent is not enabled")
+    if state.get("status") != "running":
+        raise ApiError(409, "QEMU guest agent is not running")
+    return resource
 
 
 _SIZE_RE = re.compile(r"^(?P<value>\d+)(?P<unit>[KMGT]?)$", re.IGNORECASE)

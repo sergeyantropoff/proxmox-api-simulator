@@ -1,0 +1,53 @@
+# Example: public Ingress + Let's Encrypt (cert-manager) + Hub image.
+#
+#   helm upgrade --install pve-sim ./helm/proxmox-api-simulator \
+#     -n proxmox-sim --create-namespace \
+#     -f helm/proxmox-api-simulator/values-ingress-example.yaml \
+#     --set certManager.email=you@example.com \
+#     --set ingress.hosts[0].host=pve-sim.example.com \
+#     --set ingress.tls[0].hosts[0]=pve-sim.example.com \
+#     --set secret.ticketSigningKey="$(openssl rand -hex 32)"
+
+image:
+  repository: inecs/proxmox-api-simulator
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+secret:
+  create: true
+  ticketSigningKey: "replace-me"
+
+postgresql:
+  enabled: true
+  auth:
+    username: proxmox
+    password: "replace-me-db-password"
+    database: proxmox_simulator
+
+seed:
+  enabled: true
+  profile: small
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: pve-sim.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: proxmox-api-simulator-tls
+      hosts:
+        - pve-sim.example.com
+
+certManager:
+  enabled: true
+  createClusterIssuer: true
+  createStagingIssuer: true
+  email: you@example.com
+  issuerName: letsencrypt-prod
+  stagingIssuerName: letsencrypt-staging
+  # Set true first to validate HTTP-01 against Let's Encrypt staging.
+  useStaging: false
+  solverIngressClassName: nginx

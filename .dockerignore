@@ -6,6 +6,5 @@ __pycache__
 .ruff_cache
 .env
 htmlcov
-tests
 docs
 

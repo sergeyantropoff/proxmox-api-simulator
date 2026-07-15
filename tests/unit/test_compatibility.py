@@ -1,12 +1,22 @@
 """Compatibility accounting tests."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 import pytest
+from pydantic import SecretStr
 
-from app.compatibility import CompatibilityDimension, EvidenceManifest, build_report
+from app.compatibility import (
+    CompatibilityDimension,
+    EvidenceManifest,
+    build_report,
+    resolve_evidence_path,
+)
+from app.config import Settings
 from app.contracts.model import Method, PathContract, Schema, Snapshot
+from app.contracts.runtime import build_compatibility_for_snapshot
+from app.handlers.core import build_core_handlers
 
 
 def snapshot() -> Snapshot:
@@ -105,8 +115,40 @@ def test_evidence_manifest_requires_provenance_and_unique_methods() -> None:
     evidence = manifest.dimension_map()
     assert evidence[CompatibilityDimension.HTTP_STATUS] == frozenset({("/nodes/{node}", "GET")})
     assert not evidence[CompatibilityDimension.PERMISSIONS]
+    assert manifest.verified_methods() == frozenset({("/nodes/{node}", "GET")})
+    assert manifest.observed_methods() == frozenset({("/nodes/{node}", "GET")})
 
     duplicate = manifest.model_dump(mode="json")
     duplicate["records"].append(duplicate["records"][0])
     with pytest.raises(ValueError, match="duplicate methods"):
         EvidenceManifest.model_validate(duplicate)
+
+
+def test_resolve_evidence_path_prefers_per_version_ledger() -> None:
+    settings = Settings(compatibility_evidence=Path("evidence/pve-9.2.3.json"))
+    assert resolve_evidence_path("7.4-16", settings) == Path("evidence/pve-7.4-16.json").resolve()
+    assert resolve_evidence_path("9.2.3", settings) == Path("evidence/pve-9.2.3.json").resolve()
+
+
+def test_build_compatibility_wires_verified_from_version_ledger() -> None:
+    snapshot = Snapshot.model_validate_json(
+        Path(
+            "contracts/e61a893e996d05d376579226e7dfbedbcfce8b71787adacffbc557e6e35901c1/"
+            "snapshot.json"
+        ).read_bytes()
+    )
+    settings = Settings(
+        contract_snapshot=Path(
+            "contracts/e61a893e996d05d376579226e7dfbedbcfce8b71787adacffbc557e6e35901c1/"
+            "snapshot.json"
+        ),
+        compatibility_evidence=Path("evidence/pve-9.2.3.json"),
+        ticket_signing_key=SecretStr("x" * 32),
+    )
+    handlers = build_core_handlers(settings)
+    report = build_compatibility_for_snapshot(snapshot, handlers, settings)
+    data = report.as_json()
+    levels = cast(dict[str, dict[str, object]], data["levels"])
+    assert levels["verified"]["count"] == data["total_declared"]
+    assert levels["observed"]["count"] == data["total_declared"]
+    assert levels["implemented"]["count"] == data["total_declared"]

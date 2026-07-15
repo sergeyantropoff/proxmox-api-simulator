@@ -51,3 +51,6 @@ def test_repository_migration_defines_required_planes() -> None:
     ):
         assert f"CREATE TABLE {table}" in domain
     assert "CREATE TABLE group_acl_entries" in migrations[5].sql
+    assert "ADD COLUMN IF NOT EXISTS config jsonb" in migrations[6].sql
+    assert "CREATE TABLE tfa_entries" in migrations[7].sql
+    assert "CREATE TABLE openid_pending" in migrations[7].sql

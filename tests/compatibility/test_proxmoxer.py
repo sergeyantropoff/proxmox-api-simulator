@@ -98,6 +98,7 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
         name="created-by-proxmoxer",
         cores=2,
         memory=1024,
+        agent=1,
         scsi0="local-lvm:vm-150-disk-0,size=8G",
     )
     with pytest.raises(ResourceException) as duplicate_create:
@@ -120,6 +121,15 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     move_upid = disk_api.move_disk.post(disk="scsi0", storage="local")
     assert wait_task(proxmox, move_upid)["exitstatus"] == "OK"
     assert disk_api.config.get()["scsi0"].startswith("local:")
+    assert disk_api.pending.get() == []
+    assert wait_task(proxmox, disk_api.status.start.post())["exitstatus"] == "OK"
+    assert disk_api.agent.ping.post()["result"] == {}
+    assert disk_api.agent.info.get()["result"]["version"] == "9.2.0-simulator"
+    assert disk_api.agent("get-osinfo").get()["result"]["machine"] == "x86_64"
+    assert disk_api.agent("get-host-name").get()["result"]["host-name"] == "async-update"
+    assert disk_api.agent("network-get-interfaces").get()["result"][0]["name"] == "eth0"
+    assert disk_api.agent("get-time").get()["result"]["seconds"] > 0
+    assert wait_task(proxmox, disk_api.status.stop.post())["exitstatus"] == "OK"
 
     snapshots = proxmox.nodes("pve1").qemu("150").snapshot
     snapshot_upid = snapshots.post(snapname="baseline", description="before change")

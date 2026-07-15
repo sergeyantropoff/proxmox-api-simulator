@@ -1,0 +1,50 @@
+{{- /* Kept for optional standalone migrate Job when migrate.asJob=true */ -}}
+{{- if and .Values.migrate.enabled .Values.migrate.asJob }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "proxmox-api-simulator.fullname" . }}-migrate
+  labels:
+    {{- include "proxmox-api-simulator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "proxmox-api-simulator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "proxmox-api-simulator.serviceAccountName" . }}
+      restartPolicy: OnFailure
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "proxmox-api-simulator.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "proxmox-api-simulator.secretName" . }}
+                  key: DATABASE_URL
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+          command: ["python", "-m", "app.db.migrate_cli"]
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

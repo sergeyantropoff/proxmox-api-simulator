@@ -47,7 +47,7 @@ async def test_small_seed_is_idempotent() -> None:
         await migrate(connection)
         await apply_seed(connection, small_profile())
         await apply_seed(connection, small_profile())
-        assert await connection.fetchval("SELECT count(*) FROM nodes WHERE name = 'pve1'") == 1
+        assert await connection.fetchval("SELECT count(*) FROM nodes WHERE name = 'pve01'") == 1
         assert (
             await connection.fetchval(
                 """SELECT count(*) FROM resources
@@ -68,6 +68,33 @@ async def test_small_seed_is_idempotent() -> None:
         secrets = await connection.fetch("SELECT secret_hash FROM api_tokens")
         assert all(str(row["secret_hash"]).startswith("scrypt$") for row in secrets)
         assert all("-secret" not in str(row["secret_hash"]) for row in secrets)
+    finally:
+        await connection.close()
+
+
+async def test_demo_cluster_seed_populates_realistic_state() -> None:
+    connection = await asyncpg.connect(os.environ["TEST_DATABASE_URL"])
+    try:
+        await migrate(connection)
+        from app.simulation.seed import build_profile
+
+        await apply_seed(connection, build_profile("demo-cluster"))
+        assert await connection.fetchval("SELECT count(*) FROM nodes") == 20
+        assert await connection.fetchval("SELECT count(*) FROM virtual_machines") == 850
+        assert await connection.fetchval("SELECT count(*) FROM containers") == 150
+        assert (
+            await connection.fetchval("SELECT count(*) FROM resources WHERE kind = 'ceph-osd'")
+            == 300
+        )
+        assert await connection.fetchval("SELECT count(*) FROM backups") >= 400
+        assert await connection.fetchval("SELECT count(*) FROM task_logs") >= 500
+        assert await connection.fetchval("SELECT count(*) FROM snapshots") >= 100
+        ceph_capacity = await connection.fetchval(
+            "SELECT capacity_bytes FROM storages WHERE storage_id = 'ceph-prod'"
+        )
+        assert ceph_capacity == 5 * 1024**5
+        profile = await connection.fetchval("SELECT metadata->>'profile' FROM clusters LIMIT 1")
+        assert profile == "demo-cluster"
     finally:
         await connection.close()
 

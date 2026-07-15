@@ -6,7 +6,9 @@
 primary design goal is measurable contract compatibility: routes, validation,
 authentication, permissions, response shapes, state transitions, and persistent
 long-running tasks are verified independently instead of being described as
-universally compatible.
+universally compatible. Bundled majors **6–9** ship with **100%** semantic
+handler registration for every declared contract method, with runtime hot-swap
+between those majors.
 
 The simulator does not require a live Proxmox installation during normal
 operation. Official API artifacts and sanitized observations are imported ahead
@@ -168,40 +170,39 @@ without scattering version checks through services.
 
 - Passwords and API-token secrets are stored only as password hashes.
 - Tickets are signed, short-lived, and redacted from telemetry.
-- Ticket-authenticated mutations require CSRF validation; API tokens follow the
-  selected Proxmox compatibility profile.
-- Simulator administration uses a separate prefix and credential and can be
-  disabled completely.
-- Recorder mode is opt-in, verifies TLS by default, restricts routes and methods,
-  and sanitizes secrets and personal identifiers before writing fixtures.
-- Containers run as a non-root user and support a read-only root filesystem.
+- Ticket-authenticated mutations require CSRF validation; API-token requests do
+  not require CSRF.
+- The interactive Web UI and `/admin/compatibility*` helpers are laboratory
+  surfaces without a separate admin token in the current build — network
+  exposure is the trust boundary.
+- Containers run as a non-root user in the packaged images.
+
+## Runtime contract hot-swap
+
+Cold start loads `CONTRACT_SNAPSHOT`. Operators can replace the in-memory route
+table for majors 6–9 via `POST /ui/api/contract/apply?major=N` (also exposed in
+the Web UI). The swap refreshes `/version`, OpenAPI, and compatibility state and
+is process-local (restart restores the env snapshot).
 
 ## Observability
 
-JSON logs contain request ID, route template, status, duration, safe principal
-identity, task type, and sanitized resource identifiers. Metrics avoid VMID,
-UPID, and username labels. OpenTelemetry is optional and has a no-op
-implementation so tracing is never required for startup.
+JSON logs contain request ID, route template, status, duration, and redacted
+identity fields. Process Prometheus/OpenTelemetry exporters are not shipped yet;
+Proxmox `/cluster/metrics*` handlers simulate PVE metrics-server configuration
+only.
 
 ## Testing strategy
 
-Unit tests cover deterministic contract processing and domain rules. Integration
-tests exercise repositories, transactions, workers, and application lifespan
-against PostgreSQL. Contract tests traverse imported endpoints and ensure no
-native FastAPI validation response escapes. Compatibility tests compare golden or
-live-lab observations after normalizing dynamic values. Concurrency and
-property-based tests target task leases, state transitions, serialization, and
-parsers.
-
-The first vertical release deliberately supports a small set of endpoints with
-complete stateful semantics. All other imported endpoints remain visibly
-unsupported until their handlers and compatibility tests exist.
+Unit tests cover contract processing and domain rules. Integration tests
+exercise repositories, transactions, workers, and lifespan against PostgreSQL.
+Contract and compatibility suites target majors **6–9** with **100%** handler
+registry coverage. External proxmoxer smoke runs against the Compose TLS
+gateway. Concurrency tests target task leases and state transitions.
 
 Database readiness includes the latest packaged migration version, not merely a
-successful connectivity query. Workers tolerate the documented container-first
-startup sequence by retrying failed claims until migration tables exist.
-Normalized resource writes use compare-and-swap version updates through a typed
-repository, so stale writers receive a domain conflict.
+successful connectivity query. Workers retry failed claims until migration
+tables exist. Normalized resource writes use compare-and-swap version updates
+through a typed repository, so stale writers receive a domain conflict.
 
 ## Deployment model
 
@@ -220,5 +221,8 @@ in local Docker Compose but is an external dependency in the production chart.
    and in-memory queues are not used for critical work.
 4. Compatibility is capability-driven and versioned, not implemented through
    scattered version string conditions.
-5. Unsupported semantics fail honestly by default; schema-derived or proxy
-   responses require an explicit operator mode.
+5. Missing handlers fail honestly via `CONTRACT_FALLBACK` (default `error` →
+   HTTP 501). Majors 6–9 ship with full handler registration, so declared
+   methods should not hit that path under normal operation.
+6. Laboratory docs and cookbooks live under `docs/` and `examples/`; internal
+   research/prompt notes are not part of the user guide.

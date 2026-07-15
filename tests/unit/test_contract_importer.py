@@ -6,7 +6,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.contracts.importer import RemoteSourceImporter, validate_remote_url
+from app.contracts.importer import (
+    RemoteSourceImporter,
+    validate_public_addresses,
+    validate_remote_url,
+)
 from app.contracts.normalize import normalize_snapshot
 from app.contracts.source import ApiViewerParser, SourceError
 from app.contracts.store import RevisionStore
@@ -29,6 +33,17 @@ async def public_resolver(_host: str) -> tuple[str, ...]:
 def test_remote_url_policy_rejects_unsafe_urls(url: str) -> None:
     with pytest.raises(SourceError):
         validate_remote_url(url, frozenset({"pve.proxmox.com"}))
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "198.18.0.42",
+        "::ffff:198.18.0.42",
+    ],
+)
+def test_validate_public_addresses_allows_proxy_fake_ip(address: str) -> None:
+    validate_public_addresses((address,))
 
 
 async def test_remote_import_rejects_private_resolution() -> None:

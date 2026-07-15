@@ -29,7 +29,7 @@ def qemu_handler(repository: TaskRepository, clock: Clock) -> TaskHandler:
             return await _snapshot(
                 repository, task, resource_id, operation.removeprefix("snapshot-")
             )
-        if operation == "migrate":
+        if operation == "migrate" or operation == "remote-migrate":
             return await _migrate(repository, task, resource_id, clock)
         if operation == "move-disk":
             return await _move_disk(repository, task, resource_id)
