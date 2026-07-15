@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.db.pool import Database
 from app.dependencies import get_database
 
-router = APIRouter(prefix="/health", tags=["health"])
+router = APIRouter(prefix="/health", tags=["Simulator"])
 
 
 class HealthResponse(BaseModel):

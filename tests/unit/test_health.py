@@ -42,7 +42,11 @@ async def test_health_endpoints(database_ready: bool, status_code: int) -> None:
         del settings
         return database
 
-    application = create_app(Settings(), factory)
+    application = create_app(
+        Settings(contract_snapshot=None, compatibility_evidence=None),
+        factory,
+        worker_factories=(),
+    )
     async with application.router.lifespan_context(application):
         async with AsyncClient(
             transport=ASGITransport(app=application, raise_app_exceptions=False),
@@ -73,7 +77,7 @@ async def test_lifespan_starts_and_stops_injected_workers() -> None:
             stopping.set()
 
     application = create_app(
-        Settings(),
+        Settings(contract_snapshot=None, compatibility_evidence=None),
         lambda _settings: database,
         worker_factories=(lambda _database: Worker(),),
     )

@@ -1,0 +1,42 @@
+{{- if and .Values.certManager.enabled .Values.certManager.createClusterIssuer }}
+{{- $solverClass := .Values.certManager.solverIngressClassName | default .Values.ingress.className }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.certManager.issuerName }}
+  labels:
+    {{- include "proxmox-api-simulator.labels" . | nindent 4 }}
+spec:
+  acme:
+    email: {{ required "certManager.email is required when createClusterIssuer=true" .Values.certManager.email | quote }}
+    server: {{ .Values.certManager.server | quote }}
+    privateKeySecretRef:
+      name: {{ printf "%s-account-key" .Values.certManager.issuerName }}
+    solvers:
+      - http01:
+          ingress:
+            {{- if $solverClass }}
+            ingressClassName: {{ $solverClass }}
+            {{- end }}
+---
+{{- if .Values.certManager.createStagingIssuer }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.certManager.stagingIssuerName }}
+  labels:
+    {{- include "proxmox-api-simulator.labels" . | nindent 4 }}
+spec:
+  acme:
+    email: {{ .Values.certManager.email | quote }}
+    server: {{ .Values.certManager.stagingServer | quote }}
+    privateKeySecretRef:
+      name: {{ printf "%s-account-key" .Values.certManager.stagingIssuerName }}
+    solvers:
+      - http01:
+          ingress:
+            {{- if $solverClass }}
+            ingressClassName: {{ $solverClass }}
+            {{- end }}
+{{- end }}
+{{- end }}

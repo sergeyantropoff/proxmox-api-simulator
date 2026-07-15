@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "proxmox-api-simulator.fullname" . }}
+  labels:
+    {{- include "proxmox-api-simulator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "proxmox-api-simulator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "proxmox-api-simulator.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "proxmox-api-simulator.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if and .Values.migrate.enabled (not .Values.migrate.asJob) }}
+      initContainers:
+        - name: migrate
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "proxmox-api-simulator.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "proxmox-api-simulator.secretName" . }}
+                  key: DATABASE_URL
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+          command:
+            - python
+            - -c
+            - |
+              import asyncio
+              import os
+              import sys
+              import time
+
+              import asyncpg
+
+              dsn = os.environ["DATABASE_URL"]
+              deadline = time.time() + 300
+              while True:
+                  try:
+                      async def ping() -> None:
+                          conn = await asyncpg.connect(dsn=dsn, timeout=5)
+                          await conn.close()
+
+                      asyncio.run(ping())
+                      break
+                  except Exception as exc:  # noqa: BLE001 - wait until Postgres accepts connections
+                      if time.time() >= deadline:
+                          print(f"database not ready: {exc}", file=sys.stderr)
+                          raise
+                      print(f"waiting for database: {exc}")
+                      time.sleep(3)
+
+              from app.db.migrate_cli import run
+
+              asyncio.run(run())
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      {{- end }}
+      containers:
+        - name: simulator
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "proxmox-api-simulator.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8006
+              protocol: TCP
+          env:
+            - name: APP_HOST
+              value: "0.0.0.0"
+            - name: APP_PORT
+              value: "8006"
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: CONTRACT_SNAPSHOT
+              value: {{ .Values.config.contractSnapshot | quote }}
+            - name: COMPATIBILITY_EVIDENCE
+              value: {{ .Values.config.compatibilityEvidence | quote }}
+            - name: CONTRACT_FALLBACK
+              value: {{ .Values.config.contractFallback | quote }}
+            - name: TASK_WORKER_CONCURRENCY
+              value: {{ .Values.config.taskWorkerConcurrency | quote }}
+            - name: TASK_LEASE_SECONDS
+              value: {{ .Values.config.taskLeaseSeconds | quote }}
+            - name: SIMULATION_TIME_SCALE
+              value: {{ .Values.config.simulationTimeScale | quote }}
+            - name: REQUEST_ID_HEADER
+              value: {{ .Values.config.requestIdHeader | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "proxmox-api-simulator.secretName" . }}
+                  key: DATABASE_URL
+            - name: TICKET_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "proxmox-api-simulator.secretName" . }}
+                  key: TICKET_SIGNING_KEY
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

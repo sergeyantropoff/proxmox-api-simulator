@@ -166,7 +166,7 @@ async def test_core_login_and_read_endpoints(
     write_snapshot(snapshot_path)
     database = FakeDatabase()
     app = create_app(
-        Settings(contract_snapshot=snapshot_path),
+        Settings(contract_snapshot=snapshot_path, compatibility_evidence=None),
         lambda _settings: database,
         worker_factories=(),
     )
@@ -192,7 +192,8 @@ async def test_core_login_and_read_endpoints(
     assert login.status_code == 200
     assert login.json()["data"]["username"] == "root@pam"
     assert "ticket" in login.json()["data"]
-    assert version.json()["data"]["release"] == "9.2"
+    assert version.json()["data"]["version"] == "test"
+    assert version.json()["data"]["release"] == "test"
     assert nodes.json()["data"][0]["node"] == "pve1"
     assert status.json()["data"]["status"] == "online"
     assert resources.json()["data"][0]["type"] == "qemu"

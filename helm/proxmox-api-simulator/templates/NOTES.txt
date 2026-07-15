@@ -1,0 +1,32 @@
+proxmox-api-simulator {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}".
+
+Image: {{ include "proxmox-api-simulator.image" . }}
+
+1. Check readiness:
+
+   kubectl -n {{ .Release.Namespace }} get pods -l "app.kubernetes.io/instance={{ .Release.Name }}"
+
+2. Access the API / Web UI:
+
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+   https://{{ .host }}/
+{{- end }}
+{{- if .Values.certManager.enabled }}
+   TLS certificate is requested via cert-manager ClusterIssuer
+   "{{ include "proxmox-api-simulator.clusterIssuer" . }}".
+{{- end }}
+{{- else }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "proxmox-api-simulator.fullname" . }} 8006:{{ .Values.service.port }}
+   Then open http://127.0.0.1:8006/
+{{- end }}
+
+3. Seed laboratory data (if seed.enabled was false):
+
+   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "proxmox-api-simulator.fullname" . }} -- \
+     python -m app.simulation.seed_cli
+
+   Or upgrade with --set seed.enabled=true,seed.profile=small
+
+Default lab login after seeding: root@pam / secret
+Change secret.ticketSigningKey before exposing the cluster publicly.

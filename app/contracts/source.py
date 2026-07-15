@@ -47,9 +47,9 @@ class LocalFileImporter:
 
 
 class ApiViewerParser:
-    """Extract the JSON-compatible ``apiSchema`` value without executing JS."""
+    """Extract the JSON-compatible schema value without executing JS."""
 
-    declaration = b"const apiSchema"
+    declarations = (b"const apiSchema", b"var pveapi")
     known_node_fields = frozenset({"children", "info", "leaf", "path", "text"})
 
     def parse(self, raw: bytes) -> ParsedSource:
@@ -84,18 +84,21 @@ class ApiViewerParser:
         if stripped.startswith((b"[", b"{")):
             return stripped
 
-        declaration_at = raw.find(self.declaration)
-        if declaration_at < 0:
-            raise SourceError("apiSchema declaration was not found")
-        equals_at = raw.find(b"=", declaration_at + len(self.declaration))
-        if equals_at < 0:
-            raise SourceError("apiSchema declaration has no assignment")
+        for declaration in self.declarations:
+            declaration_at = raw.find(declaration)
+            if declaration_at < 0:
+                continue
+            equals_at = raw.find(b"=", declaration_at + len(declaration))
+            if equals_at < 0:
+                raise SourceError("apiSchema declaration has no assignment")
 
-        start = self._next_non_space(raw, equals_at + 1)
-        if start >= len(raw) or raw[start] not in b"[{":
-            raise SourceError("apiSchema assignment must start with an array or object")
-        end = self._matching_end(raw, start)
-        return raw[start : end + 1]
+            start = self._next_non_space(raw, equals_at + 1)
+            if start >= len(raw) or raw[start] not in b"[{":
+                raise SourceError("apiSchema assignment must start with an array or object")
+            end = self._matching_end(raw, start)
+            return raw[start : end + 1]
+
+        raise SourceError("apiSchema declaration was not found")
 
     @staticmethod
     def _next_non_space(raw: bytes, start: int) -> int:

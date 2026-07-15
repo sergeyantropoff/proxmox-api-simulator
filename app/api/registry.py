@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import parse_qsl
 
@@ -12,7 +14,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.errors import ApiError, ContractValidationError
+from app.api.openapi import contract_openapi_tags
 from app.config import Settings
+from app.contracts.examples import schema_example
 from app.contracts.model import Method, Schema, Snapshot
 from app.db.pool import AsyncpgDatabase
 from app.security.acl import AclEntry, CapabilityRequirement, authorize, requirement_from_contract
@@ -48,18 +52,35 @@ def register_contract_routes(
     snapshot: Snapshot,
     handlers: HandlerRegistry,
     fallback: FallbackMode = "error",
-) -> None:
-    seen: set[tuple[str, str, str]] = set()
+    *,
+    existing: set[tuple[str, str, str]] | None = None,
+    require_handler: bool = False,
+    allow_existing: bool = False,
+) -> set[tuple[str, str, str]]:
+    """Register `/api2/{json,extjs}` routes for a contract snapshot.
+
+    When ``allow_existing`` is true, path/verb pairs already present in
+    ``existing`` are skipped (used to merge older majors onto a primary contract).
+    When ``require_handler`` is true, only methods with a registered semantic
+    handler are added — used for legacy-path aliases.
+    """
+
+    seen = existing if existing is not None else set()
     for contract_path in snapshot.paths:
         for contract_method in contract_path.methods:
+            if require_handler and handlers.get(contract_path.path, contract_method.verb) is None:
+                continue
             for renderer in ("json", "extjs"):
                 route = f"/api2/{renderer}{contract_path.path}"
                 key = (route, contract_method.verb, renderer)
                 if key in seen:
+                    if allow_existing:
+                        continue
                     raise RouteCollisionError(
                         f"duplicate contract route: {contract_method.verb} {route}"
                     )
                 seen.add(key)
+                implemented = handlers.get(contract_path.path, contract_method.verb) is not None
                 endpoint = _endpoint(
                     contract_path.path,
                     contract_method,
@@ -72,8 +93,48 @@ def register_contract_routes(
                     endpoint,
                     methods=[contract_method.verb],
                     name=f"contract:{renderer}:{contract_method.verb}:{contract_path.path}",
-                    openapi_extra={"x-proxmox-method-checksum": contract_method.checksum},
+                    tags=cast(
+                        list[str | Enum], contract_openapi_tags(contract_path.path, renderer)
+                    ),
+                    openapi_extra={
+                        "x-proxmox-method-checksum": contract_method.checksum,
+                        "x-proxmox-implementation": "implemented" if implemented else "unsupported",
+                    },
                 )
+    return seen
+
+
+def register_legacy_handler_routes(
+    app: FastAPI,
+    handlers: HandlerRegistry,
+    store_root: Path,
+    fallback: FallbackMode = "error",
+    *,
+    primary_version: str | None = None,
+    existing: set[tuple[str, str, str]] | None = None,
+) -> set[tuple[str, str, str]]:
+    """Expose handler-backed paths declared only in older cached contracts."""
+
+    seen = existing if existing is not None else set()
+    if not store_root.is_dir():
+        return seen
+    for revision_dir in sorted(store_root.iterdir()):
+        snapshot_path = revision_dir / "snapshot.json"
+        if not snapshot_path.is_file():
+            continue
+        snapshot = Snapshot.model_validate_json(snapshot_path.read_bytes())
+        if primary_version and snapshot.source_version == primary_version:
+            continue
+        seen = register_contract_routes(
+            app,
+            snapshot,
+            handlers,
+            fallback,
+            existing=seen,
+            require_handler=True,
+            allow_existing=True,
+        )
+    return seen
 
 
 def _endpoint(
@@ -90,13 +151,13 @@ def _endpoint(
         if handler is not None:
             data = await handler(request, inputs)
         elif fallback == "schema-default":
-            data = _schema_default(method.returns)
+            data = schema_example(method.returns)
         elif fallback == "fixture" and "fixture" in method.extra:
             data = method.extra["fixture"]
         else:
             return JSONResponse(
                 status_code=501,
-                content={"data": None, "errors": "method semantics are not implemented"},
+                content={"data": None, "errors": "handler pending for this contract method"},
             )
         content = {"data": data, "success": True} if renderer == "extjs" else {"data": data}
         response = JSONResponse(content)
@@ -176,6 +237,8 @@ async def _authorize(
         method.permissions, {name: str(value) for name, value in values.items()}
     )
     if requirement is None and semantic_path == "/nodes/{node}/qemu" and method.verb == "POST":
+        requirement = CapabilityRequirement(f"/vms/{values['vmid']}", frozenset({"VM.Allocate"}))
+    if requirement is None and semantic_path == "/nodes/{node}/lxc" and method.verb == "POST":
         requirement = CapabilityRequirement(f"/vms/{values['vmid']}", frozenset({"VM.Allocate"}))
     if requirement is None:
         return
@@ -264,6 +327,10 @@ async def _parse_inputs(request: Request, method: Method) -> dict[str, Any]:
             errors[name] = "property is not defined in schema"
     if errors:
         raise ContractValidationError(dict(sorted(errors.items())))
+    # Path params are always available to handlers even when omitted from the
+    # method property schema (common for Proxmox nested resources).
+    for name, value in request.path_params.items():
+        parsed.setdefault(name, value)
     return {
         "values": parsed,
         "path": dict(request.path_params),
@@ -305,18 +372,4 @@ def _coerce(value: Any, schema: Schema) -> Any:
 
 
 def _schema_default(schema: Schema) -> Any:
-    if schema.default is not None:
-        return schema.default
-    if schema.type == "array":
-        return []
-    if schema.type == "object":
-        return {
-            name: _schema_default(definition)
-            for name, definition in schema.properties.items()
-            if not definition.optional
-        }
-    if schema.type == "boolean":
-        return False
-    if schema.type in {"integer", "number"}:
-        return 0
-    return None
+    return schema_example(schema)

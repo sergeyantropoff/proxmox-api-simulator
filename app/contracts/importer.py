@@ -36,12 +36,27 @@ def validate_remote_url(url: str, allowed_hosts: frozenset[str]) -> str:
     return host
 
 
+# Fake-IP pools used by local proxies (Clash, Surge, etc.) still route to public hosts.
+_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+
+
+def _is_allowed_resolved_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if address.is_global:
+        return True
+    mapped = address.ipv4_mapped if isinstance(address, ipaddress.IPv6Address) else None
+    if mapped is not None and mapped in _FAKE_IP_NETWORK:
+        return True
+    if isinstance(address, ipaddress.IPv4Address) and address in _FAKE_IP_NETWORK:
+        return True
+    return False
+
+
 def validate_public_addresses(addresses: tuple[str, ...]) -> None:
     if not addresses:
         raise SourceError("remote host did not resolve")
     for value in addresses:
         address = ipaddress.ip_address(value)
-        if not address.is_global:
+        if not _is_allowed_resolved_address(address):
             raise SourceError(f"remote host resolved to a non-public address: {value}")
 
 

@@ -1,0 +1,112 @@
+---
+# Lab cookbook against proxmox-api-simulator (HTTP :8006).
+#   ansible-playbook -i inventory.ini playbook.yml
+
+- name: Proxmox API simulator cookbook
+  hosts: simulator
+  gather_facts: false
+  vars:
+    pve_base: "http://localhost:8006/api2/json"
+    pve_node: pve01
+    pve_vmid: 116
+    pve_token: "root@pam!automation=automation-secret"
+    auth_header: "PVEAPIToken={{ pve_token }}"
+
+  tasks:
+    - name: Read version
+      ansible.builtin.uri:
+        url: "{{ pve_base }}/version"
+        headers:
+          Authorization: "{{ auth_header }}"
+        return_content: true
+      register: version
+
+    - name: Show version
+      ansible.builtin.debug:
+        var: version.json
+
+    - name: Create QEMU guest
+      ansible.builtin.uri:
+        url: "{{ pve_base }}/nodes/{{ pve_node }}/qemu"
+        method: POST
+        headers:
+          Authorization: "{{ auth_header }}"
+        body_format: form-urlencoded
+        body:
+          vmid: "{{ pve_vmid }}"
+          name: "ansible-{{ pve_vmid }}"
+          cores: "1"
+          memory: "512"
+        return_content: true
+      register: create
+
+    - name: Wait for create task
+      ansible.builtin.uri:
+        url: "{{ pve_base }}/nodes/{{ pve_node }}/tasks/{{ create.json.data | urlencode }}/status"
+        headers:
+          Authorization: "{{ auth_header }}"
+        return_content: true
+      register: create_status
+      until: create_status.json.data.status == 'stopped'
+      retries: 60
+      delay: 1
+
+    - name: Start guest
+      ansible.builtin.uri:
+        url: "{{ pve_base }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/status/start"
+        method: POST
+        headers:
+          Authorization: "{{ auth_header }}"
+        return_content: true
+      register: start
+
+    - name: Wait for start task
+      ansible.builtin.uri:
+        url: "{{ pve_base }}/nodes/{{ pve_node }}/tasks/{{ start.json.data | urlencode }}/status"
+        headers:
+          Authorization: "{{ auth_header }}"
+        return_content: true
+      register: start_status
+      until: start_status.json.data.status == 'stopped'
+      retries: 60
+      delay: 1
+
+    - name: Stop guest
+      ansible.builtin.uri:
+        url: "{{ pve_base }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}/status/stop"
+        method: POST
+        headers:
+          Authorization: "{{ auth_header }}"
+        return_content: true
+      register: stop
+
+    - name: Wait for stop task
+      ansible.builtin.uri:
+        url: "{{ pve_base }}/nodes/{{ pve_node }}/tasks/{{ stop.json.data | urlencode }}/status"
+        headers:
+          Authorization: "{{ auth_header }}"
+        return_content: true
+      register: stop_status
+      until: stop_status.json.data.status == 'stopped'
+      retries: 60
+      delay: 1
+
+    - name: Delete guest
+      ansible.builtin.uri:
+        url: "{{ pve_base }}/nodes/{{ pve_node }}/qemu/{{ pve_vmid }}"
+        method: DELETE
+        headers:
+          Authorization: "{{ auth_header }}"
+        return_content: true
+      register: delete
+
+    - name: Wait for delete task
+      ansible.builtin.uri:
+        url: "{{ pve_base }}/nodes/{{ pve_node }}/tasks/{{ delete.json.data | urlencode }}/status"
+        headers:
+          Authorization: "{{ auth_header }}"
+        return_content: true
+      register: delete_status
+      until: delete_status.json.data.status == 'stopped'
+      retries: 60
+      delay: 1

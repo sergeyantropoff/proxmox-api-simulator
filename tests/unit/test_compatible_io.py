@@ -48,7 +48,7 @@ async def client_for(tmp_path: Path) -> AsyncClient:
 
     handlers.register("/nodes/{node}/test", "POST", handler)
     app = create_app(
-        Settings(contract_snapshot=path),
+        Settings(contract_snapshot=path, compatibility_evidence=None),
         lambda _settings: FakeDatabase(True),
         handlers,
         worker_factories=(),

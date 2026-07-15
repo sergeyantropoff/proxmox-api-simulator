@@ -45,6 +45,8 @@ class MethodEvidence(BaseModel):
     verb: str
     dimensions: tuple[CompatibilityDimension, ...]
     sources: tuple[str, ...]
+    observed: bool = True
+    verified: bool = True
 
     @field_validator("sources")
     @classmethod
@@ -52,6 +54,11 @@ class MethodEvidence(BaseModel):
         if not value:
             raise ValueError("evidence record requires at least one source")
         return value
+
+    @field_validator("verb")
+    @classmethod
+    def normalize_verb(cls, value: str) -> str:
+        return value.upper()
 
 
 class EvidenceManifest(BaseModel):
@@ -74,16 +81,56 @@ class EvidenceManifest(BaseModel):
             dimension: set() for dimension in CompatibilityDimension
         }
         for record in self.records:
-            key = (record.path, record.verb)
+            key = (record.path, record.verb.upper())
             for dimension in record.dimensions:
                 evidence[dimension].add(key)
         return MappingProxyType(
             {dimension: frozenset(methods) for dimension, methods in evidence.items()}
         )
 
+    def observed_methods(self) -> frozenset[MethodKey]:
+        return frozenset(
+            (record.path, record.verb.upper()) for record in self.records if record.observed
+        )
+
+    def verified_methods(self) -> frozenset[MethodKey]:
+        return frozenset(
+            (record.path, record.verb.upper()) for record in self.records if record.verified
+        )
+
 
 def load_evidence_manifest(path: Path) -> EvidenceManifest:
     return EvidenceManifest.model_validate_json(path.read_bytes())
+
+
+def evidence_dir(settings: object | None = None) -> Path:
+    """Directory that holds per-version ``pve-{version}.json`` ledgers."""
+
+    evidence = getattr(settings, "compatibility_evidence", None) if settings is not None else None
+    if isinstance(evidence, Path) and evidence.name:
+        return evidence.resolve().parent
+    return Path("evidence")
+
+
+def resolve_evidence_path(source_version: str, settings: object | None = None) -> Path | None:
+    """Resolve the evidence manifest for a contract ``source_version``.
+
+    Preference order:
+    1. ``evidence/pve-{source_version}.json`` next to the configured evidence file
+       (or ``./evidence`` when unset)
+    2. ``settings.compatibility_evidence`` when its embedded ``source_version`` matches
+    """
+
+    candidate = evidence_dir(settings) / f"pve-{source_version}.json"
+    if candidate.is_file():
+        return candidate
+    configured = getattr(settings, "compatibility_evidence", None) if settings is not None else None
+    if not isinstance(configured, Path) or not configured.is_file():
+        return None
+    manifesto = load_evidence_manifest(configured)
+    if manifesto.source_version == source_version:
+        return configured
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +280,7 @@ def build_report(
     regressions: frozenset[MethodKey] = frozenset(),
 ) -> CompatibilityReport:
     declared = frozenset(
-        (path.path, method.verb) for path in snapshot.paths for method in path.methods
+        (path.path, method.verb.upper()) for path in snapshot.paths for method in path.methods
     )
     for name, evidence in {
         "implemented": implemented,

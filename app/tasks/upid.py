@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import secrets
+import time
 from dataclasses import dataclass
 
 UPID_RE = re.compile(
@@ -56,4 +58,18 @@ class Upid:
             task_type=values["type"],
             task_id=values["task_id"],
             user=values["user"],
+        )
+
+    @classmethod
+    def allocate(cls, node: str, task_type: str, task_id: str, user: str) -> Upid:
+        """Build a collision-resistant UPID for a new task."""
+
+        return cls(
+            node=node,
+            pid=secrets.randbits(32),
+            process_start=secrets.randbits(32),
+            start_time=int(time.time()) & 0xFFFFFFFF,
+            task_type=task_type,
+            task_id=str(task_id),
+            user=user,
         )

@@ -1,0 +1,88 @@
+# Quick start with the published Docker Hub runtime image.
+#
+#   docker compose -f docker-compose.release.yml up -d
+#   docker compose -f docker-compose.release.yml run --rm --entrypoint python simulator -m app.simulation.seed_cli
+#
+# Override the image tag:
+#   IMAGE_TAG=0.1.0 docker compose -f docker-compose.release.yml up -d
+#
+# Change TICKET_SIGNING_KEY before exposing the stack beyond a local lab.
+
+name: proxmox-api-simulator-release
+
+x-app-image: &app-image
+  image: ${DOCKER_IMAGE:-inecs/proxmox-api-simulator}:${IMAGE_TAG:-0.1.0}
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql://proxmox:proxmox@postgres:5432/proxmox_simulator
+  CONTRACT_SNAPSHOT: /app/contracts/pve-9.2.3.json
+  COMPATIBILITY_EVIDENCE: /app/evidence/pve-9.2.3.json
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  TICKET_SIGNING_KEY: ${TICKET_SIGNING_KEY:-development-only-signing-key-change-me}
+  TASK_WORKER_CONCURRENCY: ${TASK_WORKER_CONCURRENCY:-2}
+  SIMULATION_TIME_SCALE: ${SIMULATION_TIME_SCALE:-10}
+
+networks:
+  simulator:
+    driver: bridge
+
+volumes:
+  postgres-data:
+
+services:
+  postgres:
+    image: postgres:17.5-bookworm
+    restart: unless-stopped
+    networks: [simulator]
+    environment:
+      POSTGRES_DB: proxmox_simulator
+      POSTGRES_USER: proxmox
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-proxmox}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proxmox -d proxmox_simulator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-127.0.0.1:5432}:5432"
+
+  migrate:
+    <<: *app-image
+    networks: [simulator]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql://proxmox:${POSTGRES_PASSWORD:-proxmox}@postgres:5432/proxmox_simulator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["python"]
+    command: ["-m", "app.db.migrate_cli"]
+    restart: "no"
+
+  simulator:
+    <<: *app-image
+    restart: unless-stopped
+    networks: [simulator]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql://proxmox:${POSTGRES_PASSWORD:-proxmox}@postgres:5432/proxmox_simulator
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/health/ready', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 20s
+    ports:
+      - "${SIMULATOR_PORT:-8006}:8006"

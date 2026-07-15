@@ -69,7 +69,7 @@ class QemuPool:
             return {
                 "id": self.resource_id,
                 "state": f'{{"status":"{status}"}}',
-                "config": '{"scsi0":"local-lvm:vm-150-disk-0,size=8G"}',
+                "config": ('{"agent":1,"name":"vm","scsi0":"local-lvm:vm-150-disk-0,size=8G"}'),
             }
         if "SELECT r.id, r.state, v.config" in sql:
             return {"id": self.resource_id, "state": '{"status":"stopped"}', "config": "{}"}
@@ -325,3 +325,40 @@ async def test_qemu_clone_and_migrate_handlers(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(ApiError) as same_node:
         await migrate(http_request, inputs(node="pve1", vmid=150, target="pve1"))
     assert same_node.value.status_code == 400
+
+
+async def test_qemu_pending_and_agent_handlers() -> None:
+    registry = HandlerRegistry()
+    register_qemu_handlers(registry)
+    pool = QemuPool()
+    pool.running = True
+    http_request = request(pool)
+    values = inputs(node="pve1", vmid=150)
+
+    pending = registry.get("/nodes/{node}/qemu/{vmid}/pending", "GET")
+    routes = {
+        "info": "/nodes/{node}/qemu/{vmid}/agent/info",
+        "os": "/nodes/{node}/qemu/{vmid}/agent/get-osinfo",
+        "host": "/nodes/{node}/qemu/{vmid}/agent/get-host-name",
+        "network": "/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces",
+        "time": "/nodes/{node}/qemu/{vmid}/agent/get-time",
+        "ping": "/nodes/{node}/qemu/{vmid}/agent/ping",
+    }
+    handlers = {
+        name: registry.get(path, "POST" if name == "ping" else "GET")
+        for name, path in routes.items()
+    }
+    assert pending and all(handlers.values())
+
+    async def call(name: str) -> dict[str, Any]:
+        handler = handlers[name]
+        assert handler is not None
+        return cast(dict[str, Any], await handler(http_request, values))
+
+    assert await pending(http_request, values) == []
+    assert (await call("info"))["result"]["version"]
+    assert (await call("os"))["result"]["machine"] == "x86_64"
+    assert (await call("host"))["result"]["host-name"] == "vm"
+    assert (await call("network"))["result"][0]["name"] == "eth0"
+    assert (await call("time"))["result"]["seconds"] > 0
+    assert (await call("ping"))["result"] == {}

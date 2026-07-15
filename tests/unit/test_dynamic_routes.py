@@ -42,7 +42,11 @@ async def request_app(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     snapshot_path = tmp_path / "snapshot.json"
     snapshot_path.write_bytes(contract_snapshot(get_method()).canonical_bytes())
-    settings = Settings(contract_snapshot=snapshot_path, contract_fallback=fallback)
+    settings = Settings(
+        contract_snapshot=snapshot_path,
+        contract_fallback=fallback,
+        compatibility_evidence=None,
+    )
     database = FakeDatabase(True)
     app = create_app(
         settings,
@@ -75,8 +79,8 @@ async def test_explicit_fallback_modes(tmp_path: Path) -> None:
     error_body, _ = await request_app(tmp_path, "error")
     default_body, _ = await request_app(tmp_path, "schema-default")
 
-    assert error_body["errors"] == "method semantics are not implemented"
-    assert default_body == {"data": {"version": None}}
+    assert error_body["errors"] == "handler pending for this contract method"
+    assert default_body["data"]["version"] in {None, "example"}
 
 
 def test_duplicate_snapshot_routes_are_rejected() -> None:

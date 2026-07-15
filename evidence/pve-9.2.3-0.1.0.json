@@ -176,6 +176,48 @@
       "verb": "POST",
       "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "long_task_behavior", "errors_prohibitions", "permissions"],
       "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py", "tests/unit/test_qemu_task.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/pending",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/agent/info",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/agent/get-osinfo",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/agent/get-host-name",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/agent/get-time",
+      "verb": "GET",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py"]
+    },
+    {
+      "path": "/nodes/{node}/qemu/{vmid}/agent/ping",
+      "verb": "POST",
+      "dimensions": ["input_parameters", "parameter_requiredness", "types_constraints", "http_status", "json_structure", "state_semantics", "errors_prohibitions", "permissions"],
+      "sources": ["tests/compatibility/test_proxmoxer.py", "tests/unit/test_qemu_handlers.py"]
     }
   ]
 }

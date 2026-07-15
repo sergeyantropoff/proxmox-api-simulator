@@ -1,57 +1,127 @@
 # proxmox-api-simulator
 
-Stateful asynchronous Proxmox VE API simulator for testing API clients and
-infrastructure tooling without a real hypervisor cluster.
+Stateful asynchronous [Proxmox VE](https://www.proxmox.com/) API simulator for
+testing API clients and infrastructure tooling without a real hypervisor
+cluster.
 
-Release 0.1.0 provides a deliberately narrow, stateful vertical slice backed by
-the authoritative imported PVE 9.2.3 contract. Compatibility claims and known
-limits are recorded in [the 0.1.0 compatibility report](docs/compatibility-0.1.0.md).
+The simulator is backed by PostgreSQL, driven by imported official API
+contracts, and exposes the same `/api2/json` and `/api2/extjs` surfaces as
+Proxmox VE. Semantic handlers persist mutations; long-running work returns
+durable UPIDs executed by leased task workers.
 
-The bundled PVE 9.2.3 declared contract contains 444 paths and 675 methods.
-Implemented semantics currently include version, ticket login, node listing and
-status, cluster resources, basic QEMU list/config/status/start/stop, and task
-list/status/log, QEMU create/sync-update/async-update/delete, plus API-token
-list/create/read/update/delete. Mutations require the ticket-bound CSRF header
-and execute through PostgreSQL-leased workers; all other declared methods return
-an explicit unsupported error.
+## Verified API coverage
 
-QEMU create, asynchronous config update, and delete return durable UPIDs and use
-the same PostgreSQL resource lock as lifecycle operations. Synchronous config
-PUT uses optimistic versioning. Common fields and unknown version-dependent
-parameters are retained in JSONB; duplicate VMIDs and overlapping operations
-fail with 409.
+Handler registry and verified surface ledgers are **100%** for every bundled major:
 
-Power lifecycle now includes start, stop, graceful shutdown, reboot, reset,
-suspend, and resume. Every operation is validated by the explicit VM state
-machine, exposes intermediate/final state through current status, and runs as a
-leased task under the same VM lock.
+| Contract | Declared | Implemented | Verified |
+|---|---:|---:|---:|
+| PVE 6.4-15 | 504 | 504 | 504 |
+| PVE 7.4-16 | 540 | 540 | 540 |
+| PVE 8.4.5 | 605 | 605 | 605 |
+| PVE 9.2.3 | 675 | 675 | 675 |
 
-## Development
+Switch the active contract at runtime from the Web UI (**Apply as runtime**) or
+`POST /ui/api/contract/apply?major=N` — each Apply loads
+`evidence/pve-{version}.json` so observed/verified scores follow the selected
+major. Regenerate ledgers after importing a new contract with `make evidence`.
+Live reports: `/admin/compatibility` (also `.md` / `.html`). See
+[Compatibility](docs/compatibility.md) and [API versions](docs/api-versions.md).
 
-Python 3.13 is required.
+> This is measurable contract and handler coverage for a laboratory simulator —
+> not a claim that every Proxmox edge case or remote integration behaves
+> identically to production hardware.
+
+## Quick start (published image)
+
+Image: [`inecs/proxmox-api-simulator`](https://hub.docker.com/r/inecs/proxmox-api-simulator)
+
+### Docker Compose
+
+```bash
+docker compose -f docker-compose.release.yml up -d
+docker compose -f docker-compose.release.yml run --rm --entrypoint python \
+  simulator -m app.simulation.seed_cli
+
+curl http://localhost:8006/health/ready
+curl http://localhost:8006/api2/json/version
+```
+
+Or: `make release-up && make release-seed PROFILE=small`
+
+### Helm (Kubernetes + Ingress + Let's Encrypt)
+
+```bash
+helm upgrade --install pve-sim ./helm/proxmox-api-simulator \
+  -n proxmox-sim --create-namespace \
+  -f ./helm/proxmox-api-simulator/values-ingress-example.yaml \
+  --set certManager.email=you@example.com \
+  --set ingress.hosts[0].host=pve-sim.example.com \
+  --set ingress.tls[0].hosts[0]=pve-sim.example.com \
+  --set secret.ticketSigningKey="$(openssl rand -hex 32)"
+```
+
+Requires an Ingress controller and cert-manager. Details:
+[Kubernetes / Helm](docs/kubernetes.md).
+
+- HTTP API and Web UI (Compose): [http://localhost:8006/](http://localhost:8006/)
+- FastAPI schema docs: [http://localhost:8006/docs](http://localhost:8006/docs)
+- Default seeded admin: `root@pam` / `secret`
+
+## Quick start (development checkout)
+
+Build and run the bind-mounted development stack from this repository:
 
 ```bash
 make install
-make ci
-```
+make up
+make seed PROFILE=small
 
-Local services expose internal HTTP on port 8006 and a development-only HTTPS
-gateway on port 8007. The checked-in certificate and key are disposable local
-test credentials and must never be used in production:
-
-```bash
-cp .env.example .env
-make docker-up
-curl http://localhost:8006/health/live
 curl http://localhost:8006/health/ready
-make db-migrate
-make seed
 curl http://localhost:8006/api2/json/version
 curl -X POST -d 'username=root@pam&password=secret' \
   http://localhost:8006/api2/json/access/ticket
 ```
 
-Unmodified proxmoxer 2.3 clients use the HTTPS gateway:
+- HTTP API and Web UI: [http://localhost:8006/](http://localhost:8006/)
+- HTTPS gateway (self-signed, development only): `https://localhost:8007`
+  — checked-in `docker/tls/server.key` is a **lab-only** localhost cert; do not
+  reuse it outside local Compose.
+- FastAPI schema docs: [http://localhost:8006/docs](http://localhost:8006/docs)
+
+### Web UI
+
+Interactive console with light/dark themes, endpoint catalog for PVE 6–9, and
+runtime contract hot-swap. More detail: [Web UI](docs/web-ui.md).
+
+![Web UI light theme](docs/images/web-ui-light.png)
+
+![Web UI dark theme](docs/images/web-ui-dark.png)
+
+## Documentation
+
+| Guide | Description |
+|---|---|
+| [Getting started](docs/getting-started.md) | First successful lab session |
+| [Configuration](docs/configuration.md) | Environment variables and Compose |
+| [Authentication](docs/authentication.md) | Tickets, CSRF, API tokens, ACLs |
+| [API versions](docs/api-versions.md) | Contracts 6–9 and hot-swap |
+| [Clients & examples](docs/clients.md) | Python, Go, Java, Perl, Ansible, Terraform, Pulumi |
+| [Seed profiles](docs/seed-profiles.md) | Deterministic cluster fixtures |
+| [API surface](docs/api-surface.md) | Routing, handlers, fallbacks |
+| [Domains](docs/domains/README.md) | QEMU, LXC, storage, HA, SDN, … |
+| [Web UI](docs/web-ui.md) | Interactive console and catalogs |
+| [Operations](docs/operations.md) | Migrate, reseed, upgrade |
+| [Kubernetes / Helm](docs/kubernetes.md) | Hub image + Ingress + Let's Encrypt |
+| [Security](docs/security.md) | Lab threat model and credentials |
+| [Observability](docs/observability.md) | Health endpoints and logging |
+| [Troubleshooting](docs/troubleshooting.md) | Common failure modes |
+| [FAQ](docs/faq.md) | Short answers |
+| [Architecture](docs/architecture.md) | Component boundaries |
+| [Compatibility](docs/compatibility.md) | Evidence model and release matrix |
+
+Runnable cookbooks live under [`examples/`](examples/README.md).
+
+## proxmoxer (HTTPS gateway)
 
 ```python
 from proxmoxer import ProxmoxAPI
@@ -61,109 +131,47 @@ proxmox = ProxmoxAPI(
     port=8007,
     user="root@pam",
     password="secret",
-    verify_ssl=False,  # local self-signed development certificate
+    verify_ssl=False,  # local self-signed development certificate only
 )
 print(proxmox.version.get())
-print(proxmox.nodes("pve1").qemu.get())
+print(proxmox.nodes("pve01").qemu.get())
 ```
 
-The deterministic seed also provides hashed development API tokens. For token
-authentication use proxmoxer `token_name="automation"` and
-`token_value="automation-secret"` with user `root@pam`. The readonly
-`auditor@pve!readonly` token proves privilege separation: authenticated reads
-work, while QEMU power operations return 403. API-token requests do not require
-CSRF; ticket-authenticated mutations still do. These are disposable local test
-credentials only.
+API token example: user `root@pam`, `token_name="automation"`,
+`token_value="automation-secret"`. Token requests do not need CSRF; ticket
+mutations do.
 
-The permission acceptance matrix additionally seeds an audit-only user through
-an inherited group ACL, a VM operator, and a storage-scoped user. Compatibility
-tests verify root access, inherited `Sys.Audit`/`VM.Audit`, operator power
-management, token privilege intersection, denial, and identical denial for an
-existing and a nonexistent VM when the principal lacks `VM.Audit`.
-
-QEMU snapshots are durable PostgreSQL records. Create, delete, and rollback use
-UPID tasks and the same per-VM lock as other mutations; rollback restores both
-the captured VM configuration and runtime state. Snapshot listing, inspection,
-and description updates are available through the native Proxmox API paths.
-Full QEMU clones copy configuration into a new stopped VM, and local migration
-moves a VM between seeded nodes through an explicit migrating state. Both are
-durable UPID operations with VMID collision and target-node validation.
-Indexed contract fields such as `scsi[n]` accept their concrete Proxmox names
-(`scsi0`, `scsi1`, and so on). QEMU disk growth is synchronous and rejects
-shrinking; disk moves are durable tasks that update normalized disk metadata and
-the preserved VM configuration.
-
-Token lifecycle is available at
-`/access/users/{userid}/token[/{tokenid}]`. A generated secret is returned only
-by create or explicit regenerate; only its scrypt hash is stored. List/read never
-return token values, and deletion immediately invalidates authentication.
-
-Run the external-client smoke flow against the Compose network with
-`PROXMOXER_HOST=tls-gateway`, `PROXMOXER_PORT=8443`, and pytest marker
-`compatibility`. It covers login, reads, CSRF-protected mutation, and UPID task
-completion.
-
-Machine-readable evidence is served at `/admin/compatibility`; deterministic
-Markdown and HTML variants use `/admin/compatibility.md` and
-`/admin/compatibility.html`. Scores are separated across all 13 contract,
-response, state, task, error, and permission dimensions.
-
-Database migrations are ordered SQL files applied transactionally and recorded
-with SHA-256 checksums. Re-running `make db-migrate` is safe; changing an already
-applied migration is rejected instead of silently drifting the schema. Readiness
-stays unavailable until the latest packaged migration is present; task workers
-retry claims and recover automatically when migrations are applied after process
-startup.
-Seed profiles are deterministic and replace the previously seeded simulation
-state atomically. `small` creates one node, two QEMU guests, one LXC, two
-storages, an administrator, and completed task history. `medium` creates three
-nodes, 50 QEMU guests, 20 LXC guests, shared/local storage and a pool;
-`ha-demo` adds HA state, while `broken-storage` makes one storage unavailable.
-`large` uses bounded asyncpg batch operations and is configurable through
-`SEED_LARGE_NODES` and `SEED_LARGE_RESOURCES` (10,000 resources by default):
+## Common Make targets
 
 ```bash
+make up / make down / make logs / make dev
+make test                 # unit + contract (includes verified surface)
+make test-integration     # PostgreSQL-backed
+make test-surface         # all verbs × majors 6-9 (0x501 / 0xexception)
+make test-compatibility   # proxmoxer against Compose
+make evidence             # regenerate evidence/pve-*.json ledgers
 make seed PROFILE=small
-make seed PROFILE=medium
-make seed PROFILE=large
-make seed PROFILE=ha-demo
-make seed PROFILE=broken-storage
+make db-migrate
+make shell
+make ci                   # ruff + mypy + offline pytest + surface probe
+make release              # build + push runtime image to Docker Hub
+make release-up           # pull/start docker-compose.release.yml
+make release-seed PROFILE=small
 ```
 
-All stable simulation identifiers use UUIDv5. Migration 004 adds normalized
-cluster, QEMU, LXC, storage/content, snapshot, backup, pool, identity,
-observation and fault-rule tables while generic resources remain the current
-0.1 compatibility boundary.
-
-Contract artifacts can be validated and imported into immutable local revisions:
+Docker Hub release (requires `docker login` as the Hub owner; see
+[Operations](docs/operations.md)):
 
 ```bash
-.venv/bin/proxmox-api-contract validate tests/fixtures/api-viewer/pve-9.2.3-version.json
-.venv/bin/proxmox-api-contract --store contracts import \
-  --file tests/fixtures/api-viewer/pve-9.2.3-version.json --version 9.2.3
-.venv/bin/proxmox-api-contract --store contracts list
+make release                          # inecs/proxmox-api-simulator:<pyproject version> + :latest
+make release VERSION=0.2.0            # override tag
+make release-build                    # build/tag only, no push
+make release-up && make release-seed  # run the published stack locally
 ```
 
-Remote imports accept HTTPS URLs on the explicit official-domain allowlist and
-reject private address resolution, unsafe redirects, oversized responses, and
-unbounded retries. Imported revisions are addressed by their normalized
-snapshot checksum and are never overwritten.
+## What this is not
 
-Normalized snapshots can be compared in text, JSON, Markdown, or HTML. The diff
-command exits with status 1 when it finds a breaking change, making it suitable
-for CI policy checks:
-
-```bash
-.venv/bin/proxmox-api-contract diff old-snapshot.json new-snapshot.json \
-  --format markdown
-```
-
-Set `CONTRACT_SNAPSHOT` to a normalized snapshot file to register its methods
-under both `/api2/json` and `/api2/extjs`. Routes without a semantic handler
-return an explicit 501 by default. `CONTRACT_FALLBACK=schema-default` enables
-schema-only exploration; `fixture` serves only values explicitly embedded in a
-method contract.
-
-See [the architecture](docs/architecture.md) for component boundaries and
-durability decisions. Commands for not-yet-implemented milestones intentionally
-return a non-zero status instead of pretending to succeed.
+- Not a hypervisor: no KVM/LXC execution on bare metal or nested hosts.
+- Not a drop-in multi-tenant production Proxmox replacement.
+- Remote IdP / LDAP / live Ceph / live ACME directories are simulated locally;
+  they do not call real external systems.
