@@ -19,6 +19,7 @@ PostgreSQL, а не процессы KVM/LXC.
 Да. Это один из основных сценариев. Закрепите мажор API, загрузите профиль seed и
 направьте клиентов на **HTTP `:8006`** (Compose) или Ingress **HTTPS** в Kubernetes. См. [Клиенты](clients.md).
 Набор Pulumi surface — [`pulumi-tests/`](../../pulumi-tests/README.ru.md).
+Карта тестов и последние результаты: [Тесты](testing.md).
 
 ## Почему некоторые вызовы OpenID / LDAP / ACME / Ceph «успешны» без внешних систем?
 

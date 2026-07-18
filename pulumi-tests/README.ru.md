@@ -58,7 +58,7 @@ CSRF=$(echo "$TICKET" | jq -r .data.CSRFPreventionToken)
 curl -s -b /tmp/pve.ck http://localhost:8006/api2/json/version | jq .
 curl -s -b /tmp/pve.ck -H "CSRFPreventionToken: $CSRF" \
   -d 'vmid=100&name=demo' \
-  http://localhost:8006/api2/json/nodes/pve01/qemu | jq .
+  http://localhost:8006/api2/json/nodes/pve1/qemu | jq .
 ```
 
 Отчёт: `pulumi-tests/pulumi/reports/report.html`.
@@ -67,4 +67,12 @@ Env провайдера (Compose): `PROXMOX_VE_ENDPOINT=https://tls-gateway:844
 (внутренний TLS suite — `pulumi-proxmoxve` не принимает `http://`), плюс
 username/password/`INSECURE`. Surface probe: `API_URL=http://simulator:8006`.
 Хостовый lab URL — plain `http://localhost:8006/` (HTTPS в K8s — только Ingress).
-Seed для CI/suite: `SEED_PROFILE=small` (default Compose).
+Seed для CI/suite: `SEED_PROFILE=small` (default Compose). Имя ноды в этом
+профиле — **`pve1`** (не `pve01`).
+
+## Последний локальный прогон (2026-07-18)
+
+`make pulumi-tests` → **Suite PASS** (~28 с): lifecycle OK; surface majors
+6.4-15 / 7.4-16 / 8.4.5 / 9.2.3 с `critical=0`; coverage **2324/2324**.
+Отчёт: `pulumi/reports/report.html`. Общий CI:
+[docs/ru/testing.md](../docs/ru/testing.md).

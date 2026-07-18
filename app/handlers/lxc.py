@@ -70,7 +70,7 @@ def _public_lxc_config(
             continue
         payload[key] = value
     digest_src = {key: value for key, value in payload.items() if key != "digest"}
-    payload["digest"] = hashlib.sha1(
+    payload["digest"] = hashlib.sha1(  # noqa: S324 - Proxmox config digests use SHA-1
         json.dumps(digest_src, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     return payload

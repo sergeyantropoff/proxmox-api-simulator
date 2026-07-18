@@ -205,7 +205,7 @@ def _format_key_example(key: str, raw: Mapping[str, Any]) -> object:
     if "default" in raw and raw["default"] is not None:
         return raw["default"]
     enum = raw.get("enum")
-    if isinstance(enum, (list, tuple)) and enum:
+    if isinstance(enum, list | tuple) and enum:
         return enum[0]
     nested_format = raw.get("format")
     if isinstance(nested_format, Mapping):
@@ -226,10 +226,10 @@ def _format_key_example(key: str, raw: Mapping[str, Any]) -> object:
         return 1
     if typ == "integer":
         minimum = raw.get("minimum")
-        return int(minimum) if isinstance(minimum, (int, float)) else 1
+        return int(minimum) if isinstance(minimum, int | float) else 1
     if typ == "number":
         minimum = raw.get("minimum")
-        return float(minimum) if isinstance(minimum, (int, float)) else 1.0
+        return float(minimum) if isinstance(minimum, int | float) else 1.0
     pattern = raw.get("pattern")
     if isinstance(pattern, str) and "second|minute|hour|day" in pattern:
         return "1/second"

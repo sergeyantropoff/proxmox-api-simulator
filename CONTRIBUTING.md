@@ -39,6 +39,9 @@ GitHub Actions runs `make ci` plus Compose/Helm validation on every push and PR
 to `main`. Run `make ci-all`, `make helm-lint`, and `make pulumi-tests` locally
 before larger API or client-facing changes.
 
+Suite layout, Make targets, and the latest recorded local results:
+[docs/testing.md](docs/testing.md).
+
 ## Project rules worth remembering
 
 1. Mutations must **persist to PostgreSQL** (tables and/or jsonb metadata).

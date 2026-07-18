@@ -33,7 +33,7 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
 
     assert proxmox.version.get()["version"] == "9.2.3"
     assert any(node["node"] == "pve1" for node in proxmox.nodes.get())
-    assert any(vm["vmid"] == 100 for vm in proxmox.nodes("pve1").qemu.get())
+    assert any(vm["vmid"] == 103 for vm in proxmox.nodes("pve1").qemu.get())
 
     token_api = ProxmoxAPI(
         os.environ["PROXMOXER_HOST"],
@@ -55,9 +55,9 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     )
     assert readonly_api.nodes.get()
     assert readonly_api.nodes("pve1").status.get()["status"] == "online"
-    assert readonly_api.nodes("pve1").qemu("100").config.get()["vmid"] == 100
+    assert readonly_api.nodes("pve1").qemu("103").config.get()["vmid"] == 103
     with pytest.raises(ResourceException) as denied:
-        readonly_api.nodes("pve1").qemu("100").status.start.post()
+        readonly_api.nodes("pve1").qemu("103").status.start.post()
     assert denied.value.status_code == 403
 
     token_endpoint = proxmox.access.users("root@pam").token("ephemeral")
@@ -88,7 +88,7 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
         token_value=os.getenv("PROXMOXER_STORAGE_TOKEN_SECRET", "storage-secret"),
         verify_ssl=False,
     )
-    for vmid in ("100", "999999"):
+    for vmid in ("103", "999999"):
         with pytest.raises(ResourceException) as hidden:
             storage_api.nodes("pve1").qemu(vmid).config.get()
         assert hidden.value.status_code == 403
@@ -176,7 +176,7 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
             token_value=os.getenv("PROXMOXER_OPERATOR_TOKEN_SECRET", "operator-secret"),
             verify_ssl=False,
         )
-        status_resource = operator_api.nodes("pve1").qemu("100").status
+        status_resource = operator_api.nodes("pve1").qemu("103").status
 
         def run(operation: str, expected: str) -> None:
             upid = status_resource(operation).post()

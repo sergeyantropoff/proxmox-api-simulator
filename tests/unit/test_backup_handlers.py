@@ -86,11 +86,24 @@ async def test_backup_jobs_crud_and_shapes() -> None:
     pool = BackupPool()
     http = _request(pool)
 
-    listed = await registry.get("/cluster/backup", "GET")(http, {"values": {}})
+    list_jobs = registry.get("/cluster/backup", "GET")
+    create_job = registry.get("/cluster/backup", "POST")
+    backup_info = registry.get("/cluster/backup-info", "GET")
+    not_backed_up = registry.get("/cluster/backup-info/not-backed-up", "GET")
+    included_volumes = registry.get("/cluster/backup/{id}/included_volumes", "GET")
+    delete_job = registry.get("/cluster/backup/{id}", "DELETE")
+    assert list_jobs is not None
+    assert create_job is not None
+    assert backup_info is not None
+    assert not_backed_up is not None
+    assert included_volumes is not None
+    assert delete_job is not None
+
+    listed = await list_jobs(http, {"values": {}})
     assert listed[0]["id"] == "backup-daily"
     assert listed[0]["schedule"] == "0 2 * * *"
 
-    await registry.get("/cluster/backup", "POST")(
+    await create_job(
         http,
         {
             "values": {
@@ -103,24 +116,19 @@ async def test_backup_jobs_crud_and_shapes() -> None:
     )
     assert "backup-weekly" in pool.metadata["backup_jobs"]
 
-    info = await registry.get("/cluster/backup-info", "GET")(http, {"values": {}})
+    info = await backup_info(http, {"values": {}})
     assert info == [{"subdir": "not-backed-up"}]
 
-    missing = await registry.get("/cluster/backup-info/not-backed-up", "GET")(http, {"values": {}})
-    assert missing == []  # 100 covered by daily; after weekly both covered? weekly adds 200
+    missing = await not_backed_up(http, {"values": {}})
     # daily covers 100, weekly covers 200 → none missing
     assert missing == []
 
-    included = await registry.get("/cluster/backup/{id}/included_volumes", "GET")(
-        http, {"values": {"id": "backup-daily"}}
-    )
+    included = await included_volumes(http, {"values": {"id": "backup-daily"}})
     assert included["children"][0]["id"] == 100
     assert included["children"][0]["children"][0]["id"] == "scsi0"
 
-    await registry.get("/cluster/backup/{id}", "DELETE")(http, {"values": {"id": "backup-weekly"}})
+    await delete_job(http, {"values": {"id": "backup-weekly"}})
     assert "backup-weekly" not in pool.metadata["backup_jobs"]
-    missing_after = await registry.get("/cluster/backup-info/not-backed-up", "GET")(
-        http, {"values": {}}
-    )
+    missing_after = await not_backed_up(http, {"values": {}})
     assert missing_after[0]["vmid"] == 200
     assert missing_after[0]["type"] == "lxc"

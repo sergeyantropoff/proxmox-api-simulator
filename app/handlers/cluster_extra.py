@@ -193,8 +193,8 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         now = int(time.time())
         seeded = metrics.get("export_series")
         if isinstance(seeded, list) and seeded:
-            series = [dict(item) for item in seeded if isinstance(item, dict)]
-            return {"data": series, "timestamp": now}
+            seeded_series = [dict(item) for item in seeded if isinstance(item, dict)]
+            return {"data": seeded_series, "timestamp": now}
         # Build a PVE-shaped metric array from live inventory (scales with seed).
         rows = await database(request).pool.fetch("SELECT name FROM nodes ORDER BY name")
         series: list[dict[str, Any]] = []

@@ -131,7 +131,7 @@ def register_acme_handlers(registry: HandlerRegistry) -> None:
             entry = {"plugin": plugin_id, **{k: v for k, v in item.items() if k != "data"}}
             if "digest" not in entry:
                 material = {k: v for k, v in entry.items() if k != "digest"}
-                entry["digest"] = hashlib.sha1(
+                entry["digest"] = hashlib.sha1(  # noqa: S324 - Proxmox config digests use SHA-1
                     json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
                 ).hexdigest()
             result.append(entry)

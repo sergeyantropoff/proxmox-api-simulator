@@ -1682,7 +1682,7 @@ def _seed_tasks_for_guests(
     return tuple(tasks)
 
 
-# UI / ops cluster sizes (hosts × total guests). Infra scales with the size.
+# UI / ops cluster sizes (hosts x total guests). Infra scales with the size.
 _CLUSTER_SIZE_SPECS: dict[str, dict[str, int]] = {
     "lab": {
         "nodes": 1,
@@ -1953,13 +1953,13 @@ def _sized_cluster_profile(name: str, *, overrides: dict[str, int] | None = None
 
 
 def small_profile() -> SeedProfile:
-    """DATA UI: 3 hosts × 50 guests."""
+    """DATA UI: 3 hosts x 50 guests."""
 
     return _sized_cluster_profile("small")
 
 
 def large_profile(*, node_count: int = 10, resource_count: int = 1_000) -> SeedProfile:
-    """DATA UI: 10 hosts × 1000 guests (overrides allowed for CLI stress)."""
+    """DATA UI: 10 hosts x 1000 guests (overrides allowed for CLI stress)."""
 
     if node_count < 1 or resource_count < 1:
         raise ValueError("large profile counts must be positive")
@@ -1971,22 +1971,22 @@ def large_profile(*, node_count: int = 10, resource_count: int = 1_000) -> SeedP
         overrides={
             "nodes": node_count,
             "guests": resource_count,
-            "osds": max(10, int(round(100 * scale))),
-            "ha": max(3, int(round(12 * scale))),
-            "tasks": max(12, int(round(50 * scale))),
-            "pool_members": max(12, min(resource_count, int(round(50 * scale)))),
+            "osds": max(10, round(100 * scale)),
+            "ha": max(3, round(12 * scale)),
+            "tasks": max(12, round(50 * scale)),
+            "pool_members": max(12, min(resource_count, round(50 * scale))),
         },
     )
 
 
 def big_profile() -> SeedProfile:
-    """DATA UI: 20 hosts × 2000 guests."""
+    """DATA UI: 20 hosts x 2000 guests."""
 
     return _sized_cluster_profile("big")
 
 
 def medium_profile() -> SeedProfile:
-    """Compatibility alias for the small (3×50) cluster."""
+    """Compatibility alias for the small (3x50) cluster."""
 
     profile = small_profile()
     return SeedProfile("medium", profile.nodes, profile.resources, profile.tasks)

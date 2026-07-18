@@ -168,6 +168,7 @@ def build_core_handlers(settings: Settings) -> HandlerRegistry:
                 "machine": "x86_64",
             }
         return {
+            "status": str(row["status"]),
             "uptime": int(payload.get("uptime") or 0),
             "wait": float(payload.get("wait") or 0.0),
             "idle": float(payload.get("idle") or 0.95),
@@ -344,7 +345,7 @@ def build_core_handlers(settings: Settings) -> HandlerRegistry:
                         "vmid": vmid,
                         "name": str(state.get("name") or f"{kind}-{external_id}"),
                         "status": status,
-                        "template": bool(state.get("template") in {True, "1", 1}),
+                        "template": bool(state.get("template") in (True, "1", 1)),
                         "cpu": _cpu_util(state, running=running),
                         "maxcpu": _maxcpu(state),
                         "mem": int(_num(state.get("mem"), 0)) if running else 0,

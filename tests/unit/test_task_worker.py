@@ -93,7 +93,10 @@ async def test_worker_retries_after_claim_failure() -> None:
         poll_seconds=0.001,
     )
     running = asyncio.create_task(worker.run())
-    await asyncio.sleep(0.01)
+    for _ in range(200):
+        if repository.attempts > 1:
+            break
+        await asyncio.sleep(0.01)
     worker.stop()
     await running
 

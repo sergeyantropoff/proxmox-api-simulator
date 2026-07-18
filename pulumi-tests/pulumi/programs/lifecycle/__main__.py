@@ -18,7 +18,7 @@ from pvelib.api import Pve
 cfg = pulumi.Config()
 smoke = (cfg.get("smoke") or os.environ.get("SMOKE_ONLY") or "0") == "1"
 
-node = os.environ.get("PVE_NODE", "pve01")
+node = os.environ.get("PVE_NODE", "pve1")
 endpoint = (
     os.environ.get("PROXMOX_VE_ENDPOINT") or "https://tls-gateway:8443/"
 ).rstrip("/") + "/"

@@ -245,7 +245,7 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
     def _wire_ceph_pool(name: str, item: dict[str, Any], *, index: int) -> dict[str, Any]:
         pool_id = item.get("pool_id", item.get("pool"))
         try:
-            pool_num = int(pool_id)
+            pool_num = int(pool_id) if pool_id is not None else index
         except (TypeError, ValueError):
             pool_num = index
         crush_raw = item.get("crush_rule", 0)
@@ -586,9 +586,8 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
                 MAX(NULLIF(regexp_replace(external_id, '\\D', '', 'g'), '')::int),
                 -1
             ) + 1
-            FROM resources r JOIN nodes n ON n.id=r.node_id
-            WHERE n.name=$1 AND r.kind='ceph-osd'""",
-            node,
+            FROM resources
+            WHERE kind='ceph-osd'""",
         )
         osd_id = int(next_id or 0)
         external_id = f"osd.{osd_id}"
@@ -607,8 +606,15 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
             "used_bytes": 0,
         }
         await database(request).pool.execute(
-            """INSERT INTO resources(id, node_id, kind, external_id, state)
-            VALUES(gen_random_uuid(), $1, 'ceph-osd', $2, $3::jsonb)""",
+            """INSERT INTO resources(id, node_id, cluster_id, kind, external_id, state)
+            VALUES(
+                gen_random_uuid(),
+                $1,
+                (SELECT cluster_id FROM nodes WHERE id=$1),
+                'ceph-osd',
+                $2,
+                $3::jsonb
+            )""",
             node_id,
             external_id,
             json.dumps(osd_state, sort_keys=True),

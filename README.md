@@ -193,6 +193,7 @@ make release-up && make release-seed  # run the published stack locally
 ## Contributing / security / changelog
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [CONTRIBUTING.ru.md](CONTRIBUTING.ru.md)
+- [Testing](docs/testing.md) · [Тесты](docs/ru/testing.md) — suites, Make targets, latest results
 - [SECURITY.md](SECURITY.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
