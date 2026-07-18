@@ -14,14 +14,31 @@ from app.handlers.common import database, require_value, state, values
 from app.simulation.seed import CLUSTER_ID, stable_id
 
 
-async def _pool_members(request: Request, pool_id: uuid.UUID) -> list[str]:
+async def _pool_members(request: Request, pool_id: uuid.UUID) -> list[dict[str, Any]]:
     rows = await database(request).pool.fetch(
-        """SELECT r.external_id FROM pool_members pm
+        """SELECT r.external_id, r.kind, r.state, n.name AS node
+        FROM pool_members pm
         JOIN resources r ON r.id = pm.resource_id
-        WHERE pm.pool_id=$1 ORDER BY r.external_id::integer""",
+        JOIN nodes n ON n.id = r.node_id
+        WHERE pm.pool_id=$1
+        ORDER BY r.external_id::integer""",
         pool_id,
     )
-    return [str(row["external_id"]) for row in rows]
+    members: list[dict[str, Any]] = []
+    for row in rows:
+        guest_state = state(row["state"])
+        kind = str(row["kind"])
+        vmid = int(row["external_id"])
+        members.append(
+            {
+                "id": f"{kind}/{vmid}",
+                "node": str(row["node"]),
+                "type": kind,
+                "vmid": vmid,
+                "name": str(guest_state.get("name") or f"{kind}-{vmid}"),
+            }
+        )
+    return members
 
 
 def register_pool_handlers(registry: HandlerRegistry) -> None:
@@ -39,16 +56,25 @@ def register_pool_handlers(registry: HandlerRegistry) -> None:
             metadata = state(row["metadata"])
             members = await _pool_members(request, row["id"])
             if not members and isinstance(metadata.get("members"), list):
-                members = [str(item) for item in metadata["members"]]
-            item: dict[str, Any] = {
+                # Fallback for metadata-only membership before pool_members rows exist.
+                for item in metadata["members"]:
+                    members.append(
+                        {
+                            "id": f"qemu/{item}",
+                            "node": "",
+                            "type": "qemu",
+                            "vmid": int(item) if str(item).isdigit() else 0,
+                        }
+                    )
+            pool_item: dict[str, Any] = {
                 "poolid": str(row["pool_id"]),
                 "members": members,
             }
             if row["comment"] is not None:
-                item["comment"] = str(row["comment"])
+                pool_item["comment"] = str(row["comment"])
             elif metadata.get("comment"):
-                item["comment"] = str(metadata["comment"])
-            result.append(item)
+                pool_item["comment"] = str(metadata["comment"])
+            result.append(pool_item)
         return result
 
     async def pool_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:

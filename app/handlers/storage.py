@@ -148,6 +148,7 @@ def register_storage_handlers(registry: HandlerRegistry) -> None:
             JOIN resources r ON r.id = s.resource_id
             JOIN nodes n ON n.id = r.node_id
             WHERE n.name=$1 OR s.shared = true
+               OR s.storage_id IN ('local', 'local-lvm')
             ORDER BY s.storage_id""",
             node,
         )
@@ -294,7 +295,55 @@ def register_storage_handlers(registry: HandlerRegistry) -> None:
         if status != "DELETE 1":
             raise ApiError(404, "volume does not exist")
 
-    async def node_storage_upload(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+    async def node_storage_allocate(request: Request, inputs: dict[str, Any]) -> str:
+        from app.handlers.nodes import _node_task
+
+        node = str(values(inputs)["node"])
+        storage_id = str(values(inputs)["storage"])
+        await require_node(request, node)
+        await _storage_row(request, None, storage_id)
+        payload = values(inputs)
+        filename = str(payload.get("filename") or f"vm-{payload.get('vmid', '0')}-disk-0")
+        content_type = str(payload.get("content") or "images")
+        size_raw = str(payload.get("size") or "1G")
+        # Accept either integer bytes or Proxmox size strings like 32G.
+        try:
+            size = int(size_raw)
+        except ValueError:
+            from app.handlers.common import parse_size_bytes
+
+            try:
+                size = parse_size_bytes(size_raw)
+            except ValueError as error:
+                raise ApiError(400, f"invalid size '{size_raw}'") from error
+        format_name = str(payload.get("format") or "raw")
+        volume_id = f"{storage_id}:{content_type}/{filename}"
+        resource_id = await database(request).pool.fetchval(
+            "SELECT resource_id FROM storages WHERE storage_id=$1",
+            storage_id,
+        )
+        await database(request).pool.execute(
+            """INSERT INTO storage_contents(
+                id, storage_resource_id, volume_id, content_type, size_bytes, metadata
+            ) VALUES(gen_random_uuid(), $1, $2, $3, $4, $5::jsonb)
+            ON CONFLICT (storage_resource_id, volume_id) DO UPDATE
+            SET size_bytes=EXCLUDED.size_bytes,
+                content_type=EXCLUDED.content_type,
+                metadata=EXCLUDED.metadata""",
+            resource_id,
+            volume_id,
+            content_type,
+            size,
+            json.dumps(
+                {"filename": filename, "format": format_name, "source": "allocate"},
+                sort_keys=True,
+            ),
+        )
+        return await _node_task(request, node=node, task_type="storage-allocate", worker="imgcopy")
+
+    async def node_storage_upload(request: Request, inputs: dict[str, Any]) -> str:
+        from app.handlers.nodes import _node_task
+
         node = str(values(inputs)["node"])
         storage_id = str(values(inputs)["storage"])
         await require_node(request, node)
@@ -326,11 +375,11 @@ def register_storage_handlers(registry: HandlerRegistry) -> None:
             size,
             json.dumps({"filename": filename, "source": "upload"}, sort_keys=True),
         )
-        return {"uploadid": volume_id, "filename": filename, "size": size, "volid": volume_id}
+        return await _node_task(request, node=node, task_type="storage-upload", worker="download")
 
     async def node_storage_prunebackups(
         request: Request, inputs: dict[str, Any]
-    ) -> list[dict[str, Any]] | None:
+    ) -> list[dict[str, Any]] | str:
         node = str(values(inputs)["node"])
         storage_id = str(values(inputs)["storage"])
         await require_node(request, node)
@@ -340,6 +389,8 @@ def register_storage_handlers(registry: HandlerRegistry) -> None:
             storage_id,
         )
         if request.method == "DELETE":
+            from app.handlers.nodes import _node_task
+
             keep = int(values(inputs).get("keep-last") or values(inputs).get("keep_last") or 1)
             await database(request).pool.execute(
                 """DELETE FROM backups
@@ -352,7 +403,9 @@ def register_storage_handlers(registry: HandlerRegistry) -> None:
                 resource_id,
                 keep,
             )
-            return None
+            return await _node_task(
+                request, node=node, task_type="prune-backups", worker="prunebackups"
+            )
         rows = await database(request).pool.fetch(
             """SELECT volume_id, size_bytes, created_at FROM backups
             WHERE storage_resource_id=$1 ORDER BY created_at DESC""",
@@ -578,7 +631,7 @@ def register_storage_handlers(registry: HandlerRegistry) -> None:
     registry.register("/nodes/{node}/storage/{storage}", "GET", node_storage_index)
     registry.register("/nodes/{node}/storage/{storage}/status", "GET", node_storage_status)
     registry.register("/nodes/{node}/storage/{storage}/content", "GET", node_storage_content)
-    registry.register("/nodes/{node}/storage/{storage}/content", "POST", node_storage_upload)
+    registry.register("/nodes/{node}/storage/{storage}/content", "POST", node_storage_allocate)
     registry.register(
         "/nodes/{node}/storage/{storage}/content/{volume}", "GET", node_storage_content_get
     )

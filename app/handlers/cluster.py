@@ -24,7 +24,43 @@ def _replication_jobs(metadata: dict[str, Any]) -> list[dict[str, Any]]:
     jobs = metadata.get("replication", [])
     if not isinstance(jobs, list):
         return []
-    return [dict(item) for item in jobs if isinstance(item, dict)]
+    result: list[dict[str, Any]] = []
+    for item in jobs:
+        if not isinstance(item, dict):
+            continue
+        guest_raw = item.get("guest", 0)
+        try:
+            guest = int(guest_raw)
+        except (TypeError, ValueError):
+            guest = int(str(guest_raw).split(":")[-1] or 0)
+        jobnum_raw = item.get("jobnum")
+        if jobnum_raw is None:
+            id_text = str(item.get("id") or "0")
+            tail = id_text.rsplit("-", 1)[-1]
+            jobnum = int(tail) if tail.isdigit() else 0
+        else:
+            jobnum = int(jobnum_raw)
+        disable = item.get("disable")
+        if disable is None:
+            disable = 0 if int(item.get("enabled", 1) or 1) else 1
+        entry = {
+            "id": str(item.get("id") or f"{guest}-{jobnum}"),
+            "guest": guest,
+            "jobnum": jobnum,
+            "target": str(item.get("target") or ""),
+            "type": str(item.get("type") or "local"),
+            "disable": bool(int(disable)),
+        }
+        if item.get("schedule") is not None:
+            entry["schedule"] = str(item["schedule"])
+        if item.get("rate") is not None:
+            entry["rate"] = int(item["rate"])
+        if item.get("comment") is not None:
+            entry["comment"] = str(item["comment"])
+        if item.get("source") is not None:
+            entry["source"] = str(item["source"])
+        result.append(entry)
+    return result
 
 
 def register_cluster_handlers(registry: HandlerRegistry) -> None:
@@ -53,24 +89,41 @@ def register_cluster_handlers(registry: HandlerRegistry) -> None:
             """SELECT id, name, status FROM nodes ORDER BY name"""
         )
         metadata = await cluster_metadata(request)
-        quorate = metadata.get("quorate")
-        result: list[dict[str, Any]] = []
+        quorate = bool(int(metadata.get("quorate", 1) or 1))
+        cluster_name = metadata.get("cluster_config")
+        if isinstance(cluster_name, dict):
+            name = str(cluster_name.get("clustername") or "pve-simulator")
+            version = int(cluster_name.get("version") or 2)
+        else:
+            name = "pve-simulator"
+            version = 2
+        result: list[dict[str, Any]] = [
+            {
+                "type": "cluster",
+                "id": "cluster",
+                "name": name,
+                "nodes": len(rows),
+                "quorate": quorate,
+                "version": version,
+            }
+        ]
         for index, row in enumerate(rows):
             online = str(row["status"]) == "online"
             ops = await load_node_ops(request, str(row["name"]))
             cluster_node = ops.get("cluster_status")
             entry = dict(cluster_node) if isinstance(cluster_node, dict) else {}
+            local_raw = entry.get("local", index == 0)
+            node_name = str(row["name"])
             result.append(
                 {
-                    "id": str(row["id"]),
-                    "name": str(row["name"]),
-                    "nodeid": entry.get("nodeid", index),
-                    "online": 1 if online else 0,
-                    "local": entry.get("local", 1 if index == 0 else 0),
-                    "ip": entry.get("ip") or ops.get("ip") or "",
-                    "level": entry.get("level", "c"),
-                    "type": entry.get("type", "node"),
-                    "quorate": entry.get("quorate", quorate if quorate is not None else 1),
+                    "type": "node",
+                    "id": f"node/{node_name}",
+                    "name": node_name,
+                    "nodeid": int(entry.get("nodeid", index + 1)),
+                    "online": online,
+                    "local": bool(int(local_raw)) if not isinstance(local_raw, bool) else local_raw,
+                    "ip": str(entry.get("ip") or ops.get("ip") or ""),
+                    "level": str(entry.get("level", "")),
                 }
             )
         return result

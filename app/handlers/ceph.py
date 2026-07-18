@@ -242,11 +242,45 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
         await _save_cluster_ceph(request, ceph)
         return _upid(node, "cephrestart")
 
+    def _wire_ceph_pool(name: str, item: dict[str, Any], *, index: int) -> dict[str, Any]:
+        pool_id = item.get("pool_id", item.get("pool"))
+        try:
+            pool_num = int(pool_id)
+        except (TypeError, ValueError):
+            pool_num = index
+        crush_raw = item.get("crush_rule", 0)
+        try:
+            crush_id = int(crush_raw)
+            crush_name = str(item.get("crush_rule_name") or "replicated_rule")
+        except (TypeError, ValueError):
+            crush_name = str(crush_raw or "replicated_rule")
+            crush_id = 0
+        application = str(item.get("application") or "rbd")
+        return {
+            "pool": pool_num,
+            "pool_name": str(item.get("pool_name") or name),
+            "size": int(item.get("size") or 3),
+            "min_size": int(item.get("min_size") or 2),
+            "pg_num": int(item.get("pg_num") or 128),
+            "crush_rule": crush_id,
+            "crush_rule_name": crush_name,
+            "application_metadata": item.get("application_metadata")
+            if isinstance(item.get("application_metadata"), dict)
+            else {application: {}},
+            "bytes_used": int(item.get("bytes_used") or 0),
+            "percent_used": float(item.get("percent_used") or 0.0),
+            "healthy": bool(item.get("healthy", True)),
+        }
+
     async def pool_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         await require_node(request, str(values(inputs)["node"]))
         ceph = await _load_cluster_ceph(request)
         pools = ceph.get("pools") or {}
-        return [dict(item) for _, item in sorted(pools.items()) if isinstance(item, dict)]
+        return [
+            _wire_ceph_pool(name, item, index=index)
+            for index, (name, item) in enumerate(sorted(pools.items()))
+            if isinstance(item, dict)
+        ]
 
     async def pool_create(request: Request, inputs: dict[str, Any]) -> str:
         payload = values(inputs)
@@ -278,7 +312,10 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
         pool = (ceph.get("pools") or {}).get(name)
         if not isinstance(pool, dict):
             raise ApiError(404, "pool does not exist")
-        return [dict(pool)]
+        # Reuse list wire shape for detail GETs.
+        names = sorted((ceph.get("pools") or {}).keys())
+        index = names.index(name) if name in names else 0
+        return [_wire_ceph_pool(name, pool, index=index)]
 
     async def pool_update(request: Request, inputs: dict[str, Any]) -> str:
         payload = values(inputs)
@@ -482,30 +519,63 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
         await _save_node_ceph(request, node, ceph)
         return _upid(node, "cephdestroymon")
 
-    async def osd_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
+    async def osd_list(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         node = str(values(inputs)["node"])
         await require_node(request, node)
         rows = await database(request).pool.fetch(
-            """SELECT r.external_id, r.state
+            """SELECT r.external_id, r.state, n.name AS node
             FROM resources r JOIN nodes n ON n.id=r.node_id
-            WHERE n.name=$1 AND r.kind='ceph-osd'
-            ORDER BY r.external_id""",
-            node,
+            WHERE r.kind='ceph-osd'
+            ORDER BY n.name, r.external_id"""
         )
-        result: list[dict[str, Any]] = []
+        hosts: dict[str, dict[str, Any]] = {}
+        host_id = -2
         for row in rows:
+            host_name = str(row["node"])
+            host = hosts.get(host_name)
+            if host is None:
+                host = {
+                    "id": host_id,
+                    "name": host_name,
+                    "type": "host",
+                    "type_id": 1,
+                    "children": [],
+                }
+                hosts[host_name] = host
+                host_id -= 1
             payload = state(row["state"])
-            osd_id = payload.get("osd_id", row["external_id"])
-            result.append(
+            osd_raw = payload.get("osd_id", row["external_id"])
+            try:
+                osd_id = int(osd_raw)
+            except (TypeError, ValueError):
+                digits = "".join(ch for ch in str(osd_raw) if ch.isdigit())
+                osd_id = int(digits) if digits else 0
+            host["children"].append(
                 {
-                    "osd": int(osd_id) if str(osd_id).isdigit() else osd_id,
+                    "id": osd_id,
+                    "name": f"osd.{osd_id}",
+                    "type": "osd",
+                    "type_id": 0,
                     "status": payload.get("status", "up"),
                     "in": 1 if payload.get("in", True) else 0,
-                    "weight": payload.get("weight", 1.0),
+                    "weight": float(payload.get("weight", 1.0)),
                     "device_class": payload.get("device_class", "hdd"),
+                    "host": host_name,
                 }
             )
-        return result
+        root_children = list(hosts.values())
+        # Prefer the requested node first in the tree for local dumps.
+        root_children.sort(key=lambda item: (0 if item["name"] == node else 1, item["name"]))
+        return {
+            "flags": "",
+            "root": {
+                "id": -1,
+                "name": "default",
+                "type": "root",
+                "type_id": 10,
+                "children": root_children,
+            },
+        }
 
     async def osd_create(request: Request, inputs: dict[str, Any]) -> str:
         payload = values(inputs)
@@ -677,16 +747,36 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
         health = ceph.get("health")
         if not isinstance(health, dict):
             health = {"status": "HEALTH_OK" if ceph.get("running") else "HEALTH_WARN"}
+        node_count = int(await database(_request).pool.fetchval("SELECT COUNT(*) FROM nodes") or 0)
         return {
-            "version": version_str,
+            "version": {
+                "version": version_str,
+                "release": "reef",
+                "epoch": 0,
+            },
             "health": health,
             "osdmap": {
+                "epoch": 1,
                 "num_osds": num_osds,
                 "num_up_osds": num_up,
                 "num_in_osds": num_in,
+                "num_remapped_pgs": 0,
             },
-            "pgmap": {"bytes_used": used, "bytes_total": total},
-            "fsmap": {"filesystems": list((ceph.get("fs") or {}).keys())},
+            "pgmap": {
+                "bytes_used": used,
+                "bytes_total": total,
+                "bytes_avail": max(total - used, 0),
+                "data_bytes": used,
+                "num_pgs": max(num_osds * 32, 32),
+            },
+            "fsmap": {
+                "epoch": 1,
+                "by_rank": [],
+                "filesystems": list((ceph.get("fs") or {}).keys()),
+            },
+            "monmap": {"num_mons": max(node_count, 1)},
+            "mgrmap": {"available": True, "num_standbys": 0},
+            "servicemap": {"epoch": 1, "services": {}},
         }
 
     base = "/nodes/{node}/ceph"

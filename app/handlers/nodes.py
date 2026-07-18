@@ -43,13 +43,59 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
         node = str(values(inputs)["node"])
         ops = await load_node_ops(request, node)
         packages = ops.get("apt", {}).get("packages", [])
-        return list(packages) if isinstance(packages, list) else []
+        if not isinstance(packages, list):
+            return []
+        result: list[dict[str, Any]] = []
+        for item in packages:
+            if not isinstance(item, dict):
+                continue
+            entry = dict(item)
+            status = str(entry.pop("Status", entry.get("CurrentState", "Installed")))
+            if status.lower() == "upgradable":
+                entry["CurrentState"] = "Installed"
+                entry.setdefault("OldVersion", entry.get("Version", ""))
+            else:
+                entry["CurrentState"] = "Installed" if status.lower() == "installed" else status
+            entry.setdefault("Package", entry.get("Package") or "unknown")
+            entry.setdefault("Version", entry.get("Version") or "")
+            entry.setdefault("Arch", "amd64")
+            entry.setdefault("Origin", "Proxmox")
+            result.append(entry)
+        return result
 
-    async def apt_repositories(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
+    async def apt_repositories(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         node = str(values(inputs)["node"])
         ops = await load_node_ops(request, node)
-        repositories = ops.get("apt", {}).get("repositories", [])
-        return list(repositories) if isinstance(repositories, list) else []
+        repositories = ops.get("apt", {}).get("repositories")
+        if isinstance(repositories, dict) and "files" in repositories:
+            return {
+                "digest": str(repositories.get("digest") or "seedapt"),
+                "files": list(repositories.get("files") or []),
+                "errors": list(repositories.get("errors") or []),
+                "infos": list(repositories.get("infos") or []),
+                "standard-repos": list(repositories.get("standard-repos") or []),
+            }
+        legacy = list(repositories) if isinstance(repositories, list) else []
+        return {
+            "digest": "seedapt",
+            "files": [
+                {
+                    "path": "/etc/apt/sources.list.d/pve-enterprise.list",
+                    "file-type": "list",
+                    "digest": "seedapt-file0",
+                    "repositories": legacy,
+                }
+            ],
+            "errors": [],
+            "infos": [],
+            "standard-repos": [
+                {
+                    "handle": "no-subscription",
+                    "name": "Proxmox VE No-Subscription Repository",
+                    "status": 1,
+                }
+            ],
+        }
 
     async def apt_changelog(request: Request, inputs: dict[str, Any]) -> str:
         node = str(values(inputs)["node"])
@@ -89,7 +135,7 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
                 return item
         raise ApiError(404, "interface does not exist")
 
-    async def network_mutate(request: Request, inputs: dict[str, Any]) -> None:
+    async def network_mutate(request: Request, inputs: dict[str, Any]) -> str | None:
         node = str(values(inputs)["node"])
         payload = values(inputs)
         ops = await load_node_ops(request, node)
@@ -140,8 +186,14 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
                 raise ApiError(404, "interface does not exist")
             ops["network"] = updated
         else:
+            # PUT /nodes/{node}/network without iface → reload (returns UPID string).
             ops["network_applied"] = True
+            await save_node_ops(request, node, ops)
+            return await _node_task(
+                request, node=node, task_type="network-reload", worker="srvreload"
+            )
         await save_node_ops(request, node, ops)
+        return None
 
     async def disks_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
         await require_node(request, str(values(inputs)["node"]))
@@ -189,7 +241,7 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
     async def disks_zfs(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         return await disks_collection(request, inputs, "zfs")
 
-    async def disks_initgpt(request: Request, inputs: dict[str, Any]) -> None:
+    async def disks_initgpt(request: Request, inputs: dict[str, Any]) -> str:
         node = str(values(inputs)["node"])
         disk = str(values(inputs).get("disk") or values(inputs).get("device") or "")
         if not disk:
@@ -219,8 +271,9 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
         disks["list"] = items
         ops["disks"] = disks
         await save_node_ops(request, node, ops)
+        return await _node_task(request, node=node, task_type="disk-initgpt", worker="diskinit")
 
-    async def disks_wipedisk(request: Request, inputs: dict[str, Any]) -> None:
+    async def disks_wipedisk(request: Request, inputs: dict[str, Any]) -> str:
         node = str(values(inputs)["node"])
         disk = str(values(inputs).get("disk") or values(inputs).get("device") or "")
         if not disk:
@@ -243,14 +296,30 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
             smart.pop(disk, None)
         ops["disks"] = disks
         await save_node_ops(request, node, ops)
+        return await _node_task(request, node=node, task_type="disk-wipe", worker="diskwipe")
 
-    async def services_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
+    async def services_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         node = str(values(inputs)["node"])
         ops = await load_node_ops(request, node)
         services = ops.get("services") or {}
-        return [{"subdir": name} for name in sorted(services)]
+        result: list[dict[str, Any]] = []
+        for name in sorted(services):
+            payload = dict(services[name]) if isinstance(services[name], dict) else {}
+            state_name = str(payload.get("state", "stopped"))
+            enabled = bool(int(payload.get("enabled", 0) or 0))
+            result.append(
+                {
+                    "service": name,
+                    "name": f"{name}.service",
+                    "desc": str(payload.get("desc") or name),
+                    "state": state_name,
+                    "active-state": "active" if state_name == "running" else "inactive",
+                    "unit-state": "enabled" if enabled else "disabled",
+                }
+            )
+        return result
 
-    async def service_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+    async def service_get(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
         node = str(values(inputs)["node"])
         service = str(values(inputs)["service"])
         ops = await load_node_ops(request, node)
@@ -258,12 +327,25 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
         if service not in services:
             services[service] = {"state": "stopped", "enabled": 0}
             await save_node_ops(request, node, ops)
-        payload = dict(services[service])
-        payload["service"] = service
-        return payload
+        return subdirs("state", "start", "stop", "restart", "reload")
 
     async def service_state(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
-        return await service_get(request, inputs)
+        node = str(values(inputs)["node"])
+        service = str(values(inputs)["service"])
+        ops = await load_node_ops(request, node)
+        services = ops.setdefault("services", {})
+        if service not in services:
+            services[service] = {"state": "stopped", "enabled": 0}
+            await save_node_ops(request, node, ops)
+        payload = dict(services[service]) if isinstance(services[service], dict) else {}
+        state_name = str(payload.get("state", "stopped"))
+        enabled = bool(int(payload.get("enabled", 0) or 0))
+        return {
+            "service": service,
+            "state": state_name,
+            "active-state": "active" if state_name == "running" else "inactive",
+            "unit-state": "enabled" if enabled else "disabled",
+        }
 
     async def service_action(request: Request, inputs: dict[str, Any]) -> str:
         node = str(values(inputs)["node"])
@@ -286,7 +368,12 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
         services[service] = current
         ops["services"] = services
         await save_node_ops(request, node, ops)
-        return "OK"
+        return await _node_task(
+            request,
+            node=node,
+            task_type=f"service-{action}",
+            worker=f"srv{action}",
+        )
 
     registry.register("/nodes/{node}/apt", "GET", apt_index)
     registry.register("/nodes/{node}/apt/versions", "GET", apt_versions)
@@ -319,6 +406,8 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
 
 
 async def _node_task(request: Request, *, node: str, task_type: str, worker: str) -> str:
+    import secrets
+
     from app.api.errors import ApiError
     from app.db.primitives import ConflictError
 
@@ -329,7 +418,7 @@ async def _node_task(request: Request, *, node: str, task_type: str, worker: str
             upid=upid,
             task_type=task_type,
             payload={"node": node},
-            resource_key=f"node:{node}",
+            resource_key=f"node:{node}:{task_type}:{secrets.token_hex(4)}",
         )
     except ConflictError as error:
         raise ApiError(409, str(error)) from error

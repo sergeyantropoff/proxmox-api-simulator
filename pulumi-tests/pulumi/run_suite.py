@@ -22,9 +22,10 @@ sys.path.insert(0, str(ROOT))
 
 def run_lifecycle(*, smoke: bool) -> dict[str, Any]:
     from pulumi import automation as auto
+    import uuid
 
     program_dir = PROGRAMS / "lifecycle"
-    stack_name = f"hxlife{os.getpid()}{int(time.time())}"
+    stack_name = f"hxlife-{uuid.uuid4().hex[:12]}"
     os.environ.setdefault("PULUMI_CONFIG_PASSPHRASE", "hx-test-passphrase")
     state = HERE / ".pulumi-state"
     state.mkdir(parents=True, exist_ok=True)
@@ -43,6 +44,21 @@ def run_lifecycle(*, smoke: bool) -> dict[str, Any]:
 
     started = time.monotonic()
     stack = None
+
+    def _cleanup() -> None:
+        if stack is None:
+            return
+        try:
+            stack.destroy(on_output=lambda _: None)
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc).lower()
+            if "no stack named" not in message and "not found" not in message:
+                raise
+        try:
+            stack.workspace.remove_stack(stack_name)
+        except Exception:
+            pass
+
     try:
         # Pass env (incl. PULUMI_BACKEND_URL) at workspace creation — assigning
         # workspace.env_vars after create_or_select_stack can lose stack selection.
@@ -67,11 +83,7 @@ def run_lifecycle(*, smoke: bool) -> dict[str, Any]:
             item = outputs.get(key)
             if item is None or getattr(item, "value", None) in (None, "", {}, []):
                 raise RuntimeError(f"lifecycle export {key!r} is empty")
-        stack.destroy(on_output=lambda _: None)
-        try:
-            stack.workspace.remove_stack(stack_name)
-        except Exception:
-            pass
+        _cleanup()
         elapsed = time.monotonic() - started
         if ids:
             return {
@@ -89,15 +101,10 @@ def run_lifecycle(*, smoke: bool) -> dict[str, Any]:
         stderr = getattr(exc, "stderr", None)
         if stderr:
             detail = f"{detail}\n{stderr}"
-        if stack is not None:
-            try:
-                stack.destroy(on_output=lambda _: None)
-            except Exception:
-                pass
-            try:
-                stack.workspace.remove_stack(stack_name)
-            except Exception:
-                pass
+        try:
+            _cleanup()
+        except Exception as cleanup_exc:  # noqa: BLE001
+            detail = f"{detail}\ncleanup: {cleanup_exc}"
         return {
             "ok": False,
             "scenarios": [
@@ -166,9 +173,17 @@ def main() -> int:
             status = "ok" if item["ok"] else "FAIL"
             print(
                 f"  {status} PVE {item['version']}: declared={item['declared']} "
-                f"probed={item['probed']} critical={item['failure_count']} "
+                f"probed={item['probed']} head={item.get('head_probed', 0)} "
+                f"critical={item['failure_count']} "
                 f"2xx={item['success_2xx']} 4xx={item['client_4xx']}"
             )
+            hist = item.get("verb_histogram") or {}
+            if hist:
+                parts = [
+                    f"{verb}:{info.get('total', 0)}"
+                    for verb, info in sorted(hist.items())
+                ]
+                print(f"    verbs: {', '.join(parts)}")
             if not item["ok"]:
                 for fail in (item.get("failures") or [])[:10]:
                     print(
@@ -177,11 +192,12 @@ def main() -> int:
                         file=sys.stderr,
                     )
 
-    # Slim JSON: drop full method lists (keep failures)
+    # Slim JSON: drop full method lists (keep failures + verb histogram)
     surface_slim = []
     for item in surface:
         slim = dict(item)
         slim.pop("methods", None)
+        slim.pop("head_methods", None)
         surface_slim.append(slim)
 
     coverage = build_coverage(surface_slim, majors=list(majors))

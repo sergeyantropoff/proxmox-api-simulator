@@ -25,11 +25,62 @@ def _sdn(metadata: dict[str, Any]) -> dict[str, Any]:
     return current if isinstance(current, dict) else {}
 
 
+_VNET_LIST_KEYS = frozenset(
+    {
+        "vnet",
+        "type",
+        "zone",
+        "alias",
+        "tag",
+        "vlanaware",
+        "digest",
+        "isolate-ports",
+        "pending",
+        "state",
+    }
+)
+
+_ZONE_LIST_KEYS = frozenset(
+    {
+        "zone",
+        "type",
+        "bridge",
+        "mtu",
+        "nodes",
+        "ipam",
+        "dns",
+        "reversedns",
+        "vlan-protocol",
+        "digest",
+        "pending",
+        "state",
+        "comment",
+    }
+)
+
+
 def _public(item: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in item.items() if key not in _SECRET_KEYS}
 
 
+def _vnet_list_item(name: str, item: dict[str, Any]) -> dict[str, Any]:
+    payload = {key: value for key, value in item.items() if key in _VNET_LIST_KEYS}
+    payload["vnet"] = str(payload.get("vnet") or name)
+    payload.setdefault("type", "vnet")
+    return _public(payload)
+
+
+def _zone_list_item(name: str, item: dict[str, Any]) -> dict[str, Any]:
+    payload = {key: value for key, value in item.items() if key in _ZONE_LIST_KEYS}
+    payload["zone"] = str(payload.get("zone") or name)
+    return _public(payload)
+
+
 def _store_list(store: dict[str, Any], *, id_key: str) -> list[dict[str, Any]]:
+    if id_key == "vnet":
+        return [_vnet_list_item(name, item) for name, item in sorted(store.items())]
+    if id_key == "zone":
+        return [_zone_list_item(name, item) for name, item in sorted(store.items())]
     return [_public({id_key: name, **item}) for name, item in sorted(store.items())]
 
 
@@ -59,7 +110,9 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
             "zones",
         )
 
-    async def apply(request: Request, inputs: dict[str, Any]) -> None:
+    async def apply(request: Request, inputs: dict[str, Any]) -> str:
+        from app.handlers.cluster_extra import _cluster_task
+
         payload = values(inputs)
         metadata, sdn = await _load(request, for_write=True)
         lock = sdn.get("lock")
@@ -71,15 +124,16 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         if payload.get("release-lock"):
             sdn["lock"] = None
         await save_cluster_metadata(request, metadata)
+        return await _cluster_task(request, task_type="sdn-apply", worker="sdnapply")
 
-    async def lock_create(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+    async def lock_create(request: Request, inputs: dict[str, Any]) -> str:
         metadata, sdn = await _load(request, for_write=True)
         if sdn.get("lock") and not values(inputs).get("allow-pending"):
             raise ApiError(400, "SDN is already locked")
         token = secrets.token_hex(8)
         sdn["lock"] = {"token": token}
         await save_cluster_metadata(request, metadata)
-        return {"digest": token, "token": token}
+        return token
 
     async def lock_delete(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)

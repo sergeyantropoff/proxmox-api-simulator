@@ -88,6 +88,74 @@ def test_method_payload_builds_examples() -> None:
     assert payload["resolved_path"] == "/nodes/pve01/qemu"
     assert payload["body_example"] == {"vmid": 100, "name": "example"}
     assert payload["implemented"] is True
+    indexed = cast(list[dict[str, Any]], payload["indexed_fields"])
+    assert indexed[0]["name"] == "scsi0"
+    assert indexed[0]["template"] == "scsi[n]"
+    assert indexed[0]["optional"] is True
+
+
+def test_method_payload_flattens_nested_body_example_into_params() -> None:
+    method = Method(
+        verb="POST",
+        name="create_mapping",
+        description="Create mapping.",
+        parameters=(
+            Parameter(name="id", definition=Schema(type="string")),
+            Parameter(
+                name="map",
+                definition=Schema(
+                    type="array",
+                    items=Schema(type="string"),
+                ),
+            ),
+            Parameter(name="comment", definition=Schema(type="string", optional=True)),
+        ),
+        returns=Schema(type="null"),
+        checksum="c" * 64,
+    )
+    snapshot = Snapshot(
+        source_version="9.2.3",
+        retrieved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        raw_sha256="d" * 64,
+        paths=(PathContract(path="/cluster/mapping/dir", methods=(method,)),),
+        path_count=1,
+        method_count=1,
+    )
+    payload = method_payload(
+        snapshot,
+        major=9,
+        path="/cluster/mapping/dir",
+        verb="POST",
+        runtime_version="9.2.3",
+        implemented_methods=None,
+    )
+    assert payload["body_example"] == {"id": "example", "map": ["example"]}
+    names = [str(item["name"]) for item in cast(list[dict[str, Any]], payload["body_fields"])]
+    assert "id" in names
+    assert "map.0" in names
+    assert "map" not in names
+    assert "comment" in names
+
+
+@pytest.mark.asyncio
+async def test_method_payload_property_string_examples_from_bundled_contract() -> None:
+    from app.web import contract_catalog
+
+    contract_catalog._SNAPSHOT_CACHE.clear()
+    snapshot = await contract_catalog.load_snapshot(8, Path("contracts"))
+    payload = method_payload(
+        snapshot,
+        major=8,
+        path="/cluster/config",
+        verb="POST",
+        runtime_version="8.4.5",
+        implemented_methods=None,
+    )
+    assert payload["body_example"] == {"clustername": "example"}
+    indexed = cast(list[dict[str, Any]], payload["indexed_fields"])
+    link0 = next(item for item in indexed if item["name"] == "link0")
+    assert link0["example"] == "192.168.0.1"
+    assert link0["typetext"] == "[address=]<IP> [,priority=<integer>]"
 
 
 @pytest.mark.asyncio

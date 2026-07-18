@@ -125,7 +125,7 @@ def register_access_handlers(registry: HandlerRegistry) -> None:
         return [
             {
                 "userid": str(row["name"]),
-                "enable": 1 if row["enabled"] else 0,
+                "enable": bool(row["enabled"]),
                 "realm-type": str(row["realm_kind"]),
             }
             for row in rows
@@ -168,10 +168,25 @@ def register_access_handlers(registry: HandlerRegistry) -> None:
         )
         if row is None:
             raise ApiError(404, "user does not exist")
+        groups = await database(request).pool.fetch(
+            """SELECT g.group_id FROM identity_group_members m
+            JOIN identity_groups g ON g.id = m.group_id
+            JOIN principals p ON p.id = m.principal_id
+            WHERE p.name=$1 ORDER BY g.group_id""",
+            userid,
+        )
+        tokens = await database(request).pool.fetch(
+            """SELECT t.token_id FROM api_tokens t
+            JOIN principals p ON p.id = t.principal_id
+            WHERE p.name=$1 ORDER BY t.token_id""",
+            userid,
+        )
         return {
             "userid": str(row["name"]),
-            "enable": 1 if row["enabled"] else 0,
+            "enable": bool(row["enabled"]),
             "realm-type": str(row["realm_kind"]),
+            "groups": [str(item["group_id"]) for item in groups],
+            "tokens": [{"tokenid": str(item["token_id"]), "privsep": 1} for item in tokens],
         }
 
     async def user_update(request: Request, inputs: dict[str, Any]) -> None:
@@ -397,10 +412,18 @@ def register_access_handlers(registry: HandlerRegistry) -> None:
         path = str(payload["path"])
         roleid = str(payload["roles"])
         propagate = bool(int(payload.get("propagate", 1)))
+        delete = bool(int(payload.get("delete", 0)))
         users = [item.strip() for item in str(payload.get("users", "")).split(",") if item.strip()]
         groups = [
             item.strip() for item in str(payload.get("groups", "")).split(",") if item.strip()
         ]
+        tokens = [
+            item.strip() for item in str(payload.get("tokens", "")).split(",") if item.strip()
+        ]
+        await database(request).pool.execute(
+            """INSERT INTO roles(name) VALUES($1) ON CONFLICT DO NOTHING""",
+            roleid,
+        )
         for userid in users:
             principal_id = await database(request).pool.fetchval(
                 "SELECT id FROM principals WHERE name=$1",
@@ -408,10 +431,15 @@ def register_access_handlers(registry: HandlerRegistry) -> None:
             )
             if principal_id is None:
                 raise ApiError(404, f"user {userid} does not exist")
-            await database(request).pool.execute(
-                """INSERT INTO roles(name) VALUES($1) ON CONFLICT DO NOTHING""",
-                roleid,
-            )
+            if delete:
+                await database(request).pool.execute(
+                    """DELETE FROM acl_entries
+                    WHERE principal_id=$1 AND role_name=$2 AND path=$3""",
+                    principal_id,
+                    roleid,
+                    path,
+                )
+                continue
             await database(request).pool.execute(
                 """INSERT INTO acl_entries(principal_id, role_name, path, propagate)
                 VALUES($1, $2, $3, $4)
@@ -429,10 +457,15 @@ def register_access_handlers(registry: HandlerRegistry) -> None:
             )
             if group_id is None:
                 raise ApiError(404, f"group {groupid} does not exist")
-            await database(request).pool.execute(
-                """INSERT INTO roles(name) VALUES($1) ON CONFLICT DO NOTHING""",
-                roleid,
-            )
+            if delete:
+                await database(request).pool.execute(
+                    """DELETE FROM group_acl_entries
+                    WHERE group_id=$1 AND role_name=$2 AND path=$3""",
+                    group_id,
+                    roleid,
+                    path,
+                )
+                continue
             await database(request).pool.execute(
                 """INSERT INTO group_acl_entries(group_id, role_name, path, propagate)
                 VALUES($1, $2, $3, $4)
@@ -443,6 +476,46 @@ def register_access_handlers(registry: HandlerRegistry) -> None:
                 path,
                 propagate,
             )
+        for token_ref in tokens:
+            # Wire form: userid!tokenid
+            userid, _, tokenid = token_ref.partition("!")
+            if not userid or not tokenid:
+                raise ApiError(400, f"invalid token ACL subject '{token_ref}'")
+            token_row = await database(request).pool.fetchrow(
+                """SELECT t.id FROM api_tokens t
+                JOIN principals p ON p.id = t.principal_id
+                WHERE p.name=$1 AND t.token_id=$2""",
+                userid,
+                tokenid,
+            )
+            if token_row is None:
+                raise ApiError(404, f"token {token_ref} does not exist")
+            # Persist as principal ACL under the owning user with token scope in path metadata.
+            # Keep durable by tagging path; GET ACL still lists principal entries.
+            scoped_path = f"{path}#token:{tokenid}" if path != "/" else f"/#token:{tokenid}"
+            principal_id = await database(request).pool.fetchval(
+                "SELECT id FROM principals WHERE name=$1",
+                userid,
+            )
+            if delete:
+                await database(request).pool.execute(
+                    """DELETE FROM acl_entries
+                    WHERE principal_id=$1 AND role_name=$2 AND path=$3""",
+                    principal_id,
+                    roleid,
+                    scoped_path,
+                )
+            else:
+                await database(request).pool.execute(
+                    """INSERT INTO acl_entries(principal_id, role_name, path, propagate)
+                    VALUES($1, $2, $3, $4)
+                    ON CONFLICT (principal_id, role_name, path) DO UPDATE
+                    SET propagate=EXCLUDED.propagate""",
+                    principal_id,
+                    roleid,
+                    scoped_path,
+                    propagate,
+                )
 
     async def token_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         userid = str(values(inputs)["userid"])
@@ -562,10 +635,8 @@ def register_access_handlers(registry: HandlerRegistry) -> None:
         )
         if row is None:
             raise ApiError(404, "role does not exist")
-        return {
-            "roleid": str(row["name"]),
-            "privs": ",".join(str(item) for item in row["privileges"]),
-        }
+        # Contract returns privilege→boolean map (additionalProperties: 0 on named privs).
+        return {str(priv): 1 for priv in row["privileges"]}
 
     async def role_create(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)

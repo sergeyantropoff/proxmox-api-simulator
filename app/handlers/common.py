@@ -129,13 +129,24 @@ def storage_payload(row: Any) -> dict[str, Any]:
     total = int(row["capacity_bytes"] or 0)
     used = int(row["used_bytes"] or 0)
     avail = max(total - used, 0)
+    storage_type = str(row["storage_type"])
+    formats = config.get("formats")
+    if not isinstance(formats, str) or not formats:
+        formats = {
+            "dir": "raw,qcow2,vmdk",
+            "lvmthin": "raw",
+            "rbd": "raw",
+            "zfspool": "raw,subvol",
+        }.get(storage_type, "raw")
     payload: dict[str, Any] = {
         "storage": str(row["storage_id"]),
-        "type": str(row["storage_type"]),
+        "type": storage_type,
         "shared": int(bool(row["shared"])),
         "content": content_str,
-        "active": 1,
-        "enabled": 1,
+        "active": int(bool(config.get("active", True))),
+        "enabled": int(bool(config.get("enabled", True))),
+        "formats": formats,
+        "select_existing": int(bool(config.get("select_existing", False))),
         "total": total,
         "used": used,
         "avail": avail,

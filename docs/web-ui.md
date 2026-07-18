@@ -10,13 +10,55 @@ request/response editing, history, and runtime contract apply.
 
 ## Screenshots
 
-Light theme — `GET /cluster/resources` on PVE 9.2.3:
+Console home (dark theme, PVE 8.4.5):
+
+![Web UI main](images/web-ui-main.png)
+
+Light / dark themes:
 
 ![Web UI light theme](images/web-ui-light.png)
 
-Dark theme — same console with theme toggle:
-
 ![Web UI dark theme](images/web-ui-dark.png)
+
+Endpoints drawer (catalog methods for the selected major):
+
+![Web UI endpoints](images/web-ui-endpoints.png)
+
+API catalog — majors 6–9, coverage, and **Apply as runtime**:
+
+![Web UI API catalog](images/web-ui-api-catalog.png)
+
+Request editor (`POST /cluster/config`):
+
+![Web UI request](images/web-ui-request.png)
+
+Contract-derived request parameters:
+
+![Web UI request parameters](images/web-ui-request-params.png)
+
+Authentication (`root@pam` / API token):
+
+![Web UI authentication](images/web-ui-authentication.png)
+
+Environment summary (runtime, cluster, guests):
+
+![Web UI environment](images/web-ui-environment.png)
+
+Request history:
+
+![Web UI history](images/web-ui-history.png)
+
+Help / compatibility ledger:
+
+![Web UI help](images/web-ui-help.png)
+
+Demo-cluster load controls:
+
+![Web UI data](images/web-ui-data.png)
+
+UPID task monitor:
+
+![Web UI UPID](images/web-ui-upid.png)
 
 ## Features
 

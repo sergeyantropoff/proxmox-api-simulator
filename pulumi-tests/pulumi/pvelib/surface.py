@@ -2,6 +2,12 @@
 
 Mirrors ``app/surface_probe.py`` classification and path/body synthesis, but
 talks HTTP to ``API_URL`` instead of an in-process ASGI app.
+
+Layer A matrix:
+- every declared path+verb (GET/PUT/POST/DELETE)
+- synthetic HEAD on each GET path (histogram only; not counted in declared)
+- ticket + CSRF on mutations; form-urlencoded bodies
+- Proxmox ``{ "data": … }`` envelope checks on 2xx
 """
 
 from __future__ import annotations
@@ -31,6 +37,11 @@ _FORBIDDEN = re.compile(
     r"handler pending for this contract method|is not supported in the (emulator|simulator)",
     re.I,
 )
+_UPID_RE = re.compile(
+    r"^UPID:[A-Za-z0-9][A-Za-z0-9_-]*:"
+    r"[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:"
+    r"[A-Za-z0-9_-]+:[^:]*:[^:]+:$"
+)
 
 _PATH_PARAM_EXAMPLES: dict[str, object] = {
     "node": "pve01",
@@ -50,6 +61,11 @@ _PATH_PARAM_EXAMPLES: dict[str, object] = {
     "key": "cpu",
     "digest": "00000000",
     "name": "example",
+    "size": "1G",
+    "filename": "vm-100-disk-0.raw",
+    "certificates": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+    "contact": "mailto:admin@example.com",
+    "clustername": "lab",
 }
 
 _EXTRA_PATH: dict[str, object] = {
@@ -85,7 +101,36 @@ _EXTRA_PATH: dict[str, object] = {
 }
 
 CRITICAL_BUCKETS = frozenset(
-    {"unimplemented_501", "unsupported_message", "server_5xx", "exception"}
+    {
+        "unimplemented_501",
+        "unsupported_message",
+        "server_5xx",
+        "exception",
+        "empty_success_body",
+        "wrong_returns_envelope",
+    }
+)
+
+# Path suffixes that real PVE usually runs via fork_worker → UPID string.
+_WORKER_SUFFIXES = (
+    "/status/start",
+    "/status/stop",
+    "/status/shutdown",
+    "/status/reboot",
+    "/status/reset",
+    "/status/suspend",
+    "/status/resume",
+    "/clone",
+    "/migrate",
+    "/remote_migrate",
+    "/snapshot",
+    "/rollback",
+    "/template",
+    "/resize",
+    "/move_disk",
+    "/move_volume",
+    "/vzdump",
+    "/apt/update",
 )
 
 
@@ -195,6 +240,64 @@ def classify(status: int, text: str) -> str:
     return f"other_{status}"
 
 
+def returns_type(method: dict[str, Any]) -> str:
+    returns = method.get("returns") or {}
+    if isinstance(returns, dict):
+        return str(returns.get("type") or "")
+    return ""
+
+
+def looks_like_worker(path_template: str, verb: str) -> bool:
+    if verb.upper() not in {"POST", "PUT"}:
+        return False
+    lowered = path_template.lower()
+    return any(lowered.endswith(suffix) for suffix in _WORKER_SUFFIXES)
+
+
+def classify_envelope(
+    *,
+    status: int,
+    text: str,
+    method: dict[str, Any],
+    path_template: str,
+    verb: str,
+) -> str | None:
+    """Return an extra critical bucket for 2xx envelope/returns mismatches, else None."""
+
+    if not (200 <= status < 300) or verb.upper() == "HEAD":
+        return None
+    returns = method.get("returns") or {}
+    rtype = returns_type(method)
+    try:
+        payload = json.loads(text) if text else None
+    except json.JSONDecodeError:
+        return "empty_success_body"
+    if not isinstance(payload, dict) or "data" not in payload:
+        return "empty_success_body"
+    data = payload.get("data")
+    if rtype == "null":
+        return None
+    if rtype == "string":
+        if data is None:
+            return "wrong_returns_envelope"
+        if looks_like_worker(path_template, verb):
+            if not isinstance(data, str) or not _UPID_RE.fullmatch(data):
+                return "wrong_returns_envelope"
+            return None
+        if isinstance(data, str):
+            return None
+        # Older PVE schemas sometimes mark list endpoints as opaque ``string``
+        # (empty properties, no description). Accept non-null structured data.
+        if isinstance(returns, dict) and not (
+            returns.get("description") or returns.get("properties") or returns.get("enum")
+        ):
+            return None
+        return "wrong_returns_envelope"
+    if rtype in {"array", "object"} and data is None:
+        return "wrong_returns_envelope"
+    return None
+
+
 def probe_major(
     client: httpx.Client,
     csrf: str,
@@ -209,6 +312,8 @@ def probe_major(
     by_verb: dict[str, Counter[str]] = defaultdict(Counter)
     failures: list[dict[str, Any]] = []
     method_results: list[dict[str, Any]] = []
+    head_results: list[dict[str, Any]] = []
+    get_paths: set[str] = set()
 
     methods: list[tuple[str, dict[str, Any]]] = [
         (path["path"], method)
@@ -225,6 +330,7 @@ def probe_major(
         params = body_for(method, path_template)
         try:
             if verb == "GET":
+                get_paths.add(path_template)
                 response = client.get(url, headers=headers, params=params or None)
             elif verb == "PUT":
                 response = client.put(url, data=params or {}, headers=headers)
@@ -232,9 +338,7 @@ def probe_major(
                 response = client.post(url, data=params or {}, headers=headers)
             elif verb == "DELETE":
                 # Proxmox accepts delete identifiers as form or query params.
-                response = client.request(
-                    "DELETE", url, data=params or {}, headers=headers
-                )
+                response = client.request("DELETE", url, data=params or {}, headers=headers)
             else:
                 by_verb[verb or "UNKNOWN"]["exception"] += 1
                 item = {
@@ -262,6 +366,15 @@ def probe_major(
 
         text = response.text
         bucket = classify(response.status_code, text)
+        envelope = classify_envelope(
+            status=response.status_code,
+            text=text,
+            method=method,
+            path_template=path_template,
+            verb=verb,
+        )
+        if envelope is not None:
+            bucket = envelope
         by_verb[verb][bucket] += 1
         ok = bucket not in CRITICAL_BUCKETS
         item = {
@@ -270,11 +383,39 @@ def probe_major(
             "status": response.status_code,
             "bucket": bucket,
             "ok": ok,
+            "returns": returns_type(method),
         }
         if not ok:
             item["body"] = text[:240]
             failures.append(item)
         method_results.append(item)
+
+    # Synthetic HEAD for every GET path (Starlette mirrors GET handlers).
+    for path_template in sorted(get_paths):
+        url = f"/api2/json{render_path(path_template)}"
+        try:
+            response = client.request("HEAD", url)
+            text = response.text
+            bucket = classify(response.status_code, text)
+        except Exception as exc:  # noqa: BLE001
+            bucket = "exception"
+            text = str(exc)[:200]
+            response = None
+        by_verb["HEAD"][bucket] += 1
+        ok = bucket not in CRITICAL_BUCKETS
+        item = {
+            "verb": "HEAD",
+            "path": path_template,
+            "status": getattr(response, "status_code", None),
+            "bucket": bucket,
+            "ok": ok,
+            "synthetic": True,
+        }
+        if not ok:
+            item["body"] = text[:240]
+            item["error"] = text[:200]
+            failures.append(item)
+        head_results.append(item)
 
     version, _ = MAJOR_REVISIONS[major]
     declared = int(snapshot.get("method_count") or len(method_results))
@@ -309,13 +450,23 @@ def probe_major(
             )
         critical = len(failures)
 
+    verb_histogram = {
+        verb: {
+            "total": sum(counter.values()),
+            "buckets": dict(counter),
+        }
+        for verb, counter in sorted(by_verb.items())
+    }
+
     return {
         "major": major,
         "version": snapshot.get("source_version") or version,
         "apply": applied,
         "declared": declared,
         "probed": probed,
+        "head_probed": len(head_results),
         "by_verb": {verb: dict(counter) for verb, counter in by_verb.items()},
+        "verb_histogram": verb_histogram,
         "success_2xx": success_2xx,
         "client_4xx": sum(
             c.get("client_4xx", 0) + c.get("auth_401_403", 0) for c in by_verb.values()
@@ -325,6 +476,7 @@ def probe_major(
         "ok": critical == 0,
         "time": time.monotonic() - started,
         "methods": method_results,
+        "head_methods": head_results,
     }
 
 

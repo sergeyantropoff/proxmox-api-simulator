@@ -116,7 +116,8 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     assert proxmox.nodes("pve1").qemu("150").config.get()["name"] == "async-update"
 
     disk_api = proxmox.nodes("pve1").qemu("150")
-    assert disk_api.resize.put(disk="scsi0", size="+2G") is None
+    resize_upid = disk_api.resize.put(disk="scsi0", size="+2G")
+    assert wait_task(proxmox, resize_upid)["exitstatus"] == "OK"
     assert "size=10G" in disk_api.config.get()["scsi0"]
     move_upid = disk_api.move_disk.post(disk="scsi0", storage="shared")
     assert wait_task(proxmox, move_upid)["exitstatus"] == "OK"

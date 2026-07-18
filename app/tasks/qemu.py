@@ -33,6 +33,10 @@ def qemu_handler(repository: TaskRepository, clock: Clock) -> TaskHandler:
             return await _migrate(repository, task, resource_id, clock)
         if operation == "move-disk":
             return await _move_disk(repository, task, resource_id)
+        if operation in {"resize", "template"}:
+            # Side effects already persisted by the API handler; complete the worker.
+            await repository.append_log(task.id, f"VM {operation} completed")
+            return {"status": "OK"}
         async with repository.pool.acquire() as connection:
             row = await connection.fetchrow("SELECT state FROM resources WHERE id=$1", resource_id)
             if row is None:

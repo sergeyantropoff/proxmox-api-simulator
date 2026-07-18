@@ -13,7 +13,7 @@ PUSH_LATEST ?= 1
 COMPOSE_RELEASE ?= $(COMPOSE) -f docker-compose.release.yml
 HELM_CHART ?= ./helm/proxmox-api-simulator
 
-.PHONY: help install format lint typecheck test test-unit test-integration test-contract test-compatibility test-surface evidence coverage run dev up down restart logs docker-build docker-up docker-down docker-logs docker-restart db-up db-down db-migrate db-reset api-import api-diff seed clean ci ci-all shell release release-build release-up release-down release-seed helm-deps helm-template helm-lint pulumi-tests
+.PHONY: help install format lint typecheck test test-unit test-integration test-contract test-compatibility test-surface evidence coverage run dev up up-local down down-local restart logs docker-build docker-up docker-down docker-logs docker-restart db-up db-down db-migrate db-reset api-import api-diff seed clean ci ci-all shell release release-build release-up release-down release-seed helm-deps helm-template helm-lint pulumi-tests push
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -75,8 +75,16 @@ up: ## Start PostgreSQL and simulator (plain HTTP :8006)
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) up -d --build --wait
 
+up-local: ## Start locally; remap busy ports via gitignored docker-compose.override.yml
+	@COMPOSE="$(COMPOSE)" ./scripts/up-local.sh
+
 down: ## Stop local services
 	$(COMPOSE) down
+
+down-local: ## Stop local stack and remove gitignored docker-compose.override.yml
+	@$(COMPOSE) down
+	@rm -f docker-compose.override.yml
+	@echo "Stopped local stack and removed docker-compose.override.yml"
 
 restart: ## Rebuild and restart the stack
 	@test -f .env || cp .env.example .env
@@ -127,7 +135,11 @@ api-diff: ## Compare API snapshots
 
 seed: ## Seed simulation data
 	@test -f .env || cp .env.example .env
-	SEED_PROFILE="$${PROFILE:-small}" $(COMPOSE) run --rm --entrypoint python $(SERVICE_SIM) -m app.simulation.seed_cli
+	$(COMPOSE) run --rm \
+		-e SEED_PROFILE="$${PROFILE:-small}" \
+		-e SEED_LARGE_NODES="$${SEED_LARGE_NODES:-10}" \
+		-e SEED_LARGE_RESOURCES="$${SEED_LARGE_RESOURCES:-1000}" \
+		--entrypoint python $(SERVICE_SIM) -m app.simulation.seed_cli
 
 shell: ## Open an interactive shell in the development container
 	$(COMPOSE) run --rm --no-deps $(SERVICE_DEV) bash
@@ -175,8 +187,12 @@ release-down: ## Stop the published Hub stack
 	$(COMPOSE_RELEASE) down
 
 release-seed: ## Seed the published Hub stack (PROFILE=small by default)
-	SEED_PROFILE="$${PROFILE:-small}" IMAGE_TAG="$${IMAGE_TAG:-$(VERSION)}" DOCKER_IMAGE="$(DOCKER_IMAGE)" \
-		$(COMPOSE_RELEASE) run --rm --entrypoint python simulator -m app.simulation.seed_cli
+	IMAGE_TAG="$${IMAGE_TAG:-$(VERSION)}" DOCKER_IMAGE="$(DOCKER_IMAGE)" \
+		$(COMPOSE_RELEASE) run --rm \
+		-e SEED_PROFILE="$${PROFILE:-small}" \
+		-e SEED_LARGE_NODES="$${SEED_LARGE_NODES:-10}" \
+		-e SEED_LARGE_RESOURCES="$${SEED_LARGE_RESOURCES:-1000}" \
+		--entrypoint python simulator -m app.simulation.seed_cli
 
 helm-deps: ## No-op placeholder (chart has no OCI dependencies)
 	@echo "Chart $(HELM_CHART) vendors PostgreSQL templates; no helm dependency update required."
@@ -196,3 +212,21 @@ helm-template: ## Render Helm manifests locally (requires helm)
 pulumi-tests: ## Full Pulumi suite (surface majors 6–9 + lifecycle, HTML report)
 	$(MAKE) -C pulumi-tests up
 	$(MAKE) -C pulumi-tests test
+
+push: ## git add ., prompt for commit message, push origin (GitHub + antropoff.ru)
+	@set -e; \
+	git add .; \
+	echo "=== staged ==="; \
+	git status --short; \
+	echo; \
+	if git diff --cached --quiet; then \
+		echo "Nothing to commit — pushing current branch."; \
+	else \
+		echo "Enter commit message, then Ctrl-D:"; \
+		msg=$$(cat </dev/tty); \
+		if [ -z "$$msg" ]; then echo "Empty commit message, aborting." >&2; exit 1; fi; \
+		git commit -m "$$msg"; \
+	fi; \
+	echo "Pushing to both remotes:"; \
+	git remote get-url --push --all origin | sed 's/^/  - /'; \
+	git push origin HEAD

@@ -10,15 +10,36 @@ import asyncpg  # type: ignore[import-untyped]
 from asyncpg import Connection
 
 from app.security.auth import hash_secret
+from app.simulation.ceph_defaults import default_ceph_flags
 
 NAMESPACE = uuid.UUID("c9040a72-b391-4a7e-9864-3ae46291a531")
 CLUSTER_ID = uuid.UUID("dc760c47-d8d7-57e6-9404-f0c6f2395d8f")
 
 
-def default_node_ops_for_seed(node_name: str) -> dict[str, object]:
+def default_node_ops_for_seed(
+    node_name: str, *, node_index: int = 0, node_count: int = 1, osds_per_node: int = 1
+) -> dict[str, object]:
     """Full durable node ops written to nodes.metadata at seed time."""
 
     suffix = (stable_id(f"node-ip:{node_name}").int % 200) + 10
+    disk_count = max(2, osds_per_node + 1)
+
+    def _disk_path(disk_index: int) -> str:
+        if disk_index < 26:
+            return f"/dev/sd{chr(ord('a') + disk_index)}"
+        # Beyond sdz keep unique, stable SCSI-style ids.
+        return f"/dev/disk/by-id/scsi-SIM{disk_index:04d}"
+
+    disk_list = [
+        {
+            "devpath": _disk_path(disk_index),
+            "size": (1_000_000_000_000 if disk_index == 0 else 2_000_000_000_000),
+            "model": "SIM-DISK-01" if disk_index == 0 else f"SIM-OSD-{disk_index:02d}",
+            "serial": f"SIM{disk_index:04d}",
+            "gpt": 1 if disk_index == 0 else 0,
+        }
+        for disk_index in range(disk_count)
+    ]
     return {
         "network": [
             {
@@ -38,46 +59,32 @@ def default_node_ops_for_seed(node_name: str) -> dict[str, object]:
             {"iface": "eno1", "type": "eth", "active": 1, "method": "manual"},
         ],
         "disks": {
-            "list": [
-                {
-                    "devpath": "/dev/sda",
-                    "size": 1_000_000_000_000,
-                    "model": "SIM-DISK-01",
-                    "serial": "SIM0001",
-                    "gpt": 1,
-                },
-                {
-                    "devpath": "/dev/sdb",
-                    "size": 2_000_000_000_000,
-                    "model": "SIM-SSD-01",
-                    "serial": "SIM0002",
-                    "gpt": 0,
-                },
-            ],
+            "list": disk_list,
             "directory": [],
             "lvm": [],
             "lvmthin": [],
             "zfs": [],
             "smart": {
-                "/dev/sda": {
+                item["devpath"]: {
                     "health": "PASSED",
                     "type": "scsi",
-                    "model": "SIM-DISK-01",
-                    "serial": "SIM0001",
-                },
-                "/dev/sdb": {
-                    "health": "PASSED",
-                    "type": "scsi",
-                    "model": "SIM-SSD-01",
-                    "serial": "SIM0002",
-                },
+                    "model": item["model"],
+                    "serial": item["serial"],
+                }
+                for item in disk_list
             },
         },
         "services": {
-            "pveproxy": {"state": "running", "enabled": 1},
-            "pvedaemon": {"state": "running", "enabled": 1},
-            "pvestatd": {"state": "running", "enabled": 1},
-            "corosync": {"state": "running", "enabled": 1},
+            "pveproxy": {"state": "running", "enabled": 1, "desc": "PVE API Proxy Server"},
+            "pvedaemon": {"state": "running", "enabled": 1, "desc": "PVE API Daemon"},
+            "pvestatd": {"state": "running", "enabled": 1, "desc": "PVE Status Daemon"},
+            "corosync": {"state": "running", "enabled": 1, "desc": "Corosync Cluster Engine"},
+            "pve-ha-crm": {"state": "running", "enabled": 1, "desc": "PVE HA CRM Daemon"},
+            "pve-ha-lrm": {"state": "running", "enabled": 1, "desc": "PVE HA LRM Daemon"},
+            "pvescheduler": {"state": "running", "enabled": 1, "desc": "Proxmox VE scheduler"},
+            "ceph-mon": {"state": "running", "enabled": 1, "desc": "Ceph Monitor"},
+            "ceph-mgr": {"state": "running", "enabled": 1, "desc": "Ceph Manager"},
+            "ceph-osd": {"state": "running", "enabled": 1, "desc": "Ceph Object Storage Daemon"},
         },
         "apt": {
             "packages": [
@@ -85,20 +92,65 @@ def default_node_ops_for_seed(node_name: str) -> dict[str, object]:
                     "Package": "pve-manager",
                     "Version": "9.2.3",
                     "OldVersion": "9.2.2",
-                    "Status": "upgradable",
+                    "CurrentState": "Installed",
+                    "Arch": "amd64",
+                    "Origin": "Proxmox",
                 },
-                {"Package": "libpve-common-perl", "Version": "9.0.3", "Status": "installed"},
-            ],
-            "repositories": [
                 {
-                    "path": "/etc/apt/sources.list.d/pve-enterprise.list",
-                    "enabled": 1,
-                    "types": "deb",
-                    "uri": "http://download.proxmox.com/debian/pve",
-                    "suites": "bookworm",
-                    "components": "pve-no-subscription",
-                }
+                    "Package": "libpve-common-perl",
+                    "Version": "9.0.3",
+                    "CurrentState": "Installed",
+                    "Arch": "amd64",
+                    "Origin": "Proxmox",
+                },
+                {
+                    "Package": "pve-kernel-6.8",
+                    "Version": "6.8.12-1",
+                    "CurrentState": "Installed",
+                    "Arch": "amd64",
+                    "Origin": "Proxmox",
+                },
+                {
+                    "Package": "ceph-common",
+                    "Version": "18.2.2",
+                    "CurrentState": "Installed",
+                    "Arch": "amd64",
+                    "Origin": "Proxmox",
+                },
             ],
+            "repositories": {
+                "digest": "seedapt",
+                "errors": [],
+                "infos": [],
+                "standard-repos": [
+                    {
+                        "handle": "enterprise",
+                        "name": "Proxmox VE Enterprise Repository",
+                        "status": 0,
+                    },
+                    {
+                        "handle": "no-subscription",
+                        "name": "Proxmox VE No-Subscription Repository",
+                        "status": 1,
+                    },
+                ],
+                "files": [
+                    {
+                        "path": "/etc/apt/sources.list.d/pve-enterprise.list",
+                        "file-type": "list",
+                        "digest": "seedapt-file0",
+                        "repositories": [
+                            {
+                                "Types": "deb",
+                                "URIs": "http://download.proxmox.com/debian/pve",
+                                "Suites": "bookworm",
+                                "Components": "pve-no-subscription",
+                                "Enabled": 1,
+                            }
+                        ],
+                    }
+                ],
+            },
             "update": {"status": "stopped", "exitstatus": "OK"},
             "changelogs": {
                 "pve-manager": "pve-manager (9.2.3) bookworm\n\n  * simulator seed\n",
@@ -171,22 +223,39 @@ def default_node_ops_for_seed(node_name: str) -> dict[str, object]:
         "certificates": {
             "custom": None,
             "acme": {"account": "letsencrypt", "domains": [], "certificate": None},
-            "info": [],
+            "info": [
+                {
+                    "filename": "pve-ssl.pem",
+                    "fingerprint": _seed_fingerprint(node_name),
+                    "issuer": f"CN={node_name}.proxmox.local",
+                    "subject": f"CN={node_name}.proxmox.local",
+                    "notbefore": 1_700_000_000,
+                    "notafter": 2_000_000_000,
+                    "pem": (
+                        "-----BEGIN CERTIFICATE-----\n"
+                        "SIMULATOR-SEED-CERT\n"
+                        "-----END CERTIFICATE-----\n"
+                    ),
+                    "san": [f"{node_name}.proxmox.local", f"IP:10.0.0.{suffix}"],
+                    "public-key-type": "rsa",
+                    "public-key-bits": 4096,
+                }
+            ],
         },
         "ceph": {
             "mds": {},
             "mgr": {
                 node_name: {
                     "name": node_name,
-                    "state": "active",
+                    "state": "active" if node_index == 0 else "standby",
                     "addr": f"{node_name}.local:6800",
                 }
             },
             "mon": {
                 node_name: {
                     "name": node_name,
+                    "rank": node_index,
                     "addr": f"{node_name}.local:6789",
-                    "rank": 0,
                 }
             },
             "log": [{"t": 1_700_000_000, "n": 0, "line": "ceph simulator ready"}],
@@ -259,7 +328,7 @@ def default_node_ops_for_seed(node_name: str) -> dict[str, object]:
                 "dumpdir": "backup",
                 "mode": "snapshot",
                 "remove": 0,
-                "storage": "nfs-backup",
+                "storage": "local",
                 "mailto": "",
                 "notes-template": "{{guestname}}",
             },
@@ -273,30 +342,105 @@ def default_node_ops_for_seed(node_name: str) -> dict[str, object]:
         "status": {
             "uptime": 86_400 + suffix,
             "cpu": 0.05 + (suffix % 10) * 0.01,
+            "mem": 4_000_000_000 + suffix * 10_000_000,
+            "maxmem": 32_000_000_000,
+            "maxcpu": 16,
             "memory": {
                 "used": 4_000_000_000 + suffix * 10_000_000,
                 "total": 32_000_000_000,
+                "free": 28_000_000_000 - suffix * 10_000_000,
+                "available": 28_000_000_000 - suffix * 10_000_000,
+            },
+            "rootfs": {
+                "used": 12 * 1024**3,
+                "total": 100 * 1024**3,
+                "avail": 88 * 1024**3,
+                "free": 88 * 1024**3,
+            },
+            "swap": {"used": 0, "total": 8 * 1024**3, "free": 8 * 1024**3},
+            "cpuinfo": {
+                "cpus": 16,
+                "cores": 8,
+                "sockets": 2,
+                "model": "QEMU Virtual CPU version 2.5+",
+                "flags": "fpu vme de pse tsc msr pae mce cx8",
+            },
+            "boot-info": {"mode": "efi", "secureboot": 0},
+            "current-kernel": {
+                "sysname": "Linux",
+                "release": "6.8.12-1-pve",
+                "version": "#1 SMP PREEMPT_DYNAMIC PMX 6.8.12-1",
+                "machine": "x86_64",
             },
             "loadavg": ["0.10", "0.20", "0.30"],
             "kversion": "6.8.12-1-pve",
             "pveversion": "pve-manager/9.2.3",
+            "ssl_fingerprint": _seed_fingerprint(node_name),
         },
         "ip": f"10.32.1.{suffix}",
         "cluster_status": {
             "ip": f"10.32.1.{suffix}",
-            "level": "c",
+            "level": "",
             "type": "node",
             "quorate": 1,
         },
     }
 
 
-def enrich_guest_state(state: dict[str, object], *, kind: str, vmid: str) -> dict[str, object]:
-    """Ensure qemu/lxc resources carry durable agent/rrd/migrate catalogs."""
+def enrich_guest_state(
+    state: dict[str, object],
+    *,
+    kind: str,
+    vmid: str,
+    slim: bool = False,
+) -> dict[str, object]:
+    """Ensure qemu/lxc resources carry durable agent/rrd/migrate catalogs.
+
+    ``slim=True`` (large profiles) keeps wire config keys without heavy agent/rrd.
+    """
 
     enriched = dict(state)
     name = str(enriched.get("name") or f"{kind}-{vmid}")
     suffix = stable_id(f"guest-runtime:{kind}:{vmid}").int % 200
+    if slim:
+        if kind == "qemu":
+            enriched.setdefault("scsi0", f"local-lvm:vm-{vmid}-disk-0,size=32G")
+            enriched.setdefault("scsihw", "virtio-scsi-pci")
+            enriched.setdefault("ostype", "l26")
+            enriched.setdefault("boot", "order=scsi0")
+            enriched.setdefault("net0", f"virtio=02:00:00:00:{suffix:02x}:01,bridge=vmbr0")
+            enriched.setdefault("memory", enriched.get("memory") or 2048)
+            enriched.setdefault("cores", enriched.get("cores") or 2)
+            enriched.setdefault("agent", "1")
+            enriched.setdefault("maxdisk", 32 * 1024**3)
+        else:
+            enriched.setdefault("rootfs", f"local-lvm:vm-{vmid}-disk-0,size=8G")
+            enriched.setdefault("ostype", "alpine")
+            enriched.setdefault("unprivileged", 1)
+            enriched.setdefault("swap", 512)
+            enriched.setdefault(
+                "net0",
+                f"name=eth0,bridge=vmbr0,hwaddr=02:00:00:00:{suffix:02x}:11,ip=dhcp",
+            )
+            enriched.setdefault("memory", enriched.get("memory") or 512)
+            enriched.setdefault("cores", enriched.get("cores") or 1)
+            enriched.setdefault("hostname", name)
+            enriched.setdefault("maxdisk", 8 * 1024**3)
+        enriched.setdefault("status", enriched.get("status") or "stopped")
+        enriched.setdefault("name", name)
+        # Lightweight runtime counters so list/status dumps stay PVE-shaped without
+        # storing full agent/rrd catalogs for thousand-guest profiles.
+        running = str(enriched.get("status")) in {"running", "paused"}
+        enriched.setdefault("cpu", 0.12 if running else 0.0)
+        enriched.setdefault("disk", (suffix + 1) * 1024**2 if running else 0)
+        enriched.setdefault("diskread", suffix * 10_000 if running else 0)
+        enriched.setdefault("diskwrite", suffix * 4_000 if running else 0)
+        enriched.setdefault("netin", suffix * 8_000 if running else 0)
+        enriched.setdefault("netout", suffix * 3_000 if running else 0)
+        enriched.setdefault("uptime", 3_600 + suffix if running else 0)
+        enriched.setdefault("pid", 12_000 + suffix if running else 0)
+        return enriched
+
     agent_enabled = enriched.get("agent")
     if isinstance(agent_enabled, bool) and not agent_enabled:
         agent: dict[str, object] = {"enabled": False, "files": {}, "results": {}}
@@ -396,15 +540,66 @@ def enrich_guest_state(state: dict[str, object], *, kind: str, vmid: str) -> dic
         ]
     if "cloudinit_dump" not in enriched:
         enriched["cloudinit_dump"] = f"#cloud-config\nhostname: {name}\nmanage_etc_hosts: true\n"
+    # Disk keys live in guest config so resize/move handlers work after seed.
+    if kind == "qemu":
+        enriched.setdefault("scsi0", f"local-lvm:vm-{vmid}-disk-0,size=32G")
+        enriched.setdefault("scsihw", "virtio-scsi-pci")
+        enriched.setdefault("ostype", "l26")
+        enriched.setdefault("boot", "order=scsi0")
+        enriched.setdefault("net0", f"virtio=02:00:00:00:{suffix:02x}:01,bridge=vmbr0")
+        enriched.setdefault("memory", enriched.get("memory") or 2048)
+        enriched.setdefault("cores", enriched.get("cores") or 2)
+        enriched.setdefault("maxdisk", 32 * 1024**3)
+    elif kind == "lxc":
+        enriched.setdefault("rootfs", f"local-lvm:vm-{vmid}-disk-0,size=8G")
+        enriched.setdefault("ostype", "alpine")
+        enriched.setdefault("unprivileged", 1)
+        enriched.setdefault("swap", 512)
+        enriched.setdefault(
+            "net0",
+            f"name=eth0,bridge=vmbr0,hwaddr=02:00:00:00:{suffix:02x}:11,ip=dhcp",
+        )
+        enriched.setdefault("memory", enriched.get("memory") or 512)
+        enriched.setdefault("cores", enriched.get("cores") or 1)
+        enriched.setdefault("hostname", name)
+        enriched.setdefault("maxdisk", 8 * 1024**3)
+    running = str(enriched.get("status") or "stopped") in {"running", "paused"}
+    enriched.setdefault("cpu", 0.12 if running else 0.0)
+    enriched.setdefault("disk", (suffix + 1) * 1024**2 if running else 0)
+    enriched.setdefault("diskread", suffix * 10_000 if running else 0)
+    enriched.setdefault("diskwrite", suffix * 4_000 if running else 0)
+    enriched.setdefault("netin", suffix * 8_000 if running else 0)
+    enriched.setdefault("netout", suffix * 3_000 if running else 0)
+    enriched.setdefault("uptime", 3_600 + suffix if running else 0)
+    enriched.setdefault("pid", 12_000 + suffix if running else 0)
     return enriched
 
 
 def enrich_storage_state(state: dict[str, object], *, storage_id: str) -> dict[str, object]:
     enriched = dict(state)
-    total_raw = enriched.get("total_bytes", 100)
+    if "total_bytes" not in enriched and "capacity_bytes" not in enriched:
+        enriched["total_bytes"] = 100 * 1024**3
+    if "used_bytes" not in enriched:
+        total_hint = enriched.get("total_bytes", enriched.get("capacity_bytes", 100 * 1024**3))
+        total_i = int(total_hint) if isinstance(total_hint, int | float | str) else 100 * 1024**3
+        enriched["used_bytes"] = max(total_i // 10, 1)
+    total_raw = enriched.get("total_bytes", enriched.get("capacity_bytes", 100))
     total = int(total_raw) if isinstance(total_raw, int | float | str) else 100
     used_raw = enriched.get("used_bytes", max(total // 10, 1))
     used = int(used_raw) if isinstance(used_raw, int | float | str) else max(total // 10, 1)
+    enriched.setdefault("disk", used)
+    enriched.setdefault("maxdisk", total)
+    if "plugintype" not in enriched:
+        if "lvm" in storage_id:
+            enriched["plugintype"] = "lvmthin"
+        elif storage_id.startswith("ceph"):
+            enriched["plugintype"] = "rbd"
+        elif storage_id.startswith("nfs"):
+            enriched["plugintype"] = "nfs"
+        else:
+            enriched["plugintype"] = "dir"
+    if "content" not in enriched:
+        enriched["content"] = ["images"]
     if "rrd" not in enriched or not isinstance(enriched.get("rrd"), dict):
         enriched["rrd"] = {"filename": f"pve-storage-{storage_id}.rrd"}
     if "rrddata" not in enriched or not isinstance(enriched.get("rrddata"), list):
@@ -429,7 +624,7 @@ def enrich_storage_state(state: dict[str, object], *, storage_id: str) -> dict[s
     if "identity" not in enriched or not isinstance(enriched.get("identity"), dict):
         enriched["identity"] = {
             "fingerprint": f"fp-{storage_id}",
-            "type": str(enriched.get("storage_type") or "dir"),
+            "type": str(enriched.get("storage_type") or enriched.get("plugintype") or "dir"),
         }
     return enriched
 
@@ -508,12 +703,120 @@ def _empty_firewall_scope(*, options: dict[str, object] | None = None) -> dict[s
     }
 
 
+def _seed_fingerprint(node_name: str) -> str:
+    digest = stable_id(f"pve-fp:{node_name}").hex
+    # SHA-256 fingerprint wire form: 32 colon-separated hex bytes.
+    padded = (digest * 4)[:64]
+    return ":".join(padded[index : index + 2].upper() for index in range(0, 64, 2))
+
+
+def _seed_cluster_config(profile_name: str, node_names: list[str]) -> dict[str, object]:
+    clustername = f"pve-{profile_name}"
+    added_nodes: dict[str, dict[str, object]] = {}
+    for index, node_name in enumerate(node_names, start=1):
+        suffix = (stable_id(f"node-ip:{node_name}").int % 200) + 10
+        addr = f"10.0.0.{suffix}"
+        added_nodes[node_name] = {
+            "node": node_name,
+            "nodeid": index,
+            "ring0_addr": addr,
+            "pve_addr": addr,
+            "pve_fp": _seed_fingerprint(node_name),
+            "quorum_votes": 1,
+        }
+    nodelist_lines = ["nodelist {"]
+    for node_name, entry in added_nodes.items():
+        nodelist_lines.extend(
+            [
+                "  node {",
+                f"    name: {node_name}",
+                f"    nodeid: {entry['nodeid']}",
+                f"    quorum_votes: {entry['quorum_votes']}",
+                f"    ring0_addr: {entry['ring0_addr']}",
+                "  }",
+            ]
+        )
+    nodelist_lines.append("}")
+    corosync_conf = "\n".join(
+        [
+            "totem {",
+            "  version: 2",
+            f"  cluster_name: {clustername}",
+            "  secauth: on",
+            "}",
+            *nodelist_lines,
+            "quorum {",
+            "  provider: corosync_votequorum",
+            "}",
+            "",
+        ]
+    )
+    return {
+        "clustername": clustername,
+        "votes": 1,
+        "links": {},
+        "join_info": {},
+        "totem": {
+            "version": 2,
+            "secauth": "on",
+            "cluster_name": clustername,
+        },
+        "qdevice": {"status": "disabled"},
+        "apiversion": 1,
+        "corosync_authkey": stable_id(f"corosync-authkey:{clustername}").hex,
+        "corosync_conf": corosync_conf,
+        "config_digest": stable_id(f"corosync-digest:{clustername}").hex,
+        "added_nodes": added_nodes,
+    }
+
+
+def _replication_seed_jobs(
+    profile_name: str,
+    *,
+    qemu_guests: list[tuple[str, str]],
+    node_names: list[str],
+    primary: str,
+    secondary: str,
+    multi_node: bool,
+) -> list[dict[str, object]]:
+    """Proportional sample replication jobs for multi-node cluster profiles."""
+
+    if not multi_node or not qemu_guests:
+        return []
+    job_count = max(int(_size_spec(profile_name).get("replication", 1)), 0)
+    if job_count <= 0:
+        return []
+    targets = [name for name in node_names if name != primary] or [secondary]
+    jobs: list[dict[str, object]] = []
+    for index, (source, guest) in enumerate(qemu_guests[:job_count]):
+        target = targets[index % len(targets)]
+        if target == source and len(targets) > 1:
+            target = targets[(index + 1) % len(targets)]
+        jobs.append(
+            {
+                "id": f"{guest}-0",
+                "guest": int(guest),
+                "jobnum": 0,
+                "target": target,
+                "type": "local",
+                "schedule": "*/15",
+                "rate": 100,
+                "comment": f"Replicate VM/CT {guest} to {target}",
+                "disable": 0,
+                "source": source,
+            }
+        )
+    return jobs
+
+
 def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
     """Durable cluster metadata domains so list endpoints are non-empty after seed."""
 
     node_names = [node.name for node in profile.nodes]
     primary = node_names[0] if node_names else "pve01"
-    secondary = node_names[1] if len(node_names) > 1 else "pve02"
+    # Single-node profiles must not invent ghost peers (replication/SDN).
+    secondary = node_names[1] if len(node_names) > 1 else primary
+    multi_node = len(node_names) > 1
     node_by_id = {node.id: node.name for node in profile.nodes}
 
     qemu_guests: list[tuple[str, str]] = []
@@ -527,11 +830,12 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
         elif resource.kind == "lxc":
             lxc_guests.append((node_name, resource.external_id))
 
-    # Keep large profiles bounded; small/demo stay fully covered within the cap.
-    guest_cap = 128 if profile.name == "large" else 10_000
+    scale = _size_spec(profile.name)
+    guest_cap = int(scale.get("fw_guest_cap", 10_000))
     qemu_guests = qemu_guests[:guest_cap]
     lxc_guests = lxc_guests[:guest_cap]
-    replication_guest = qemu_guests[0][1] if qemu_guests else "100"
+    osd_count = sum(1 for resource in profile.resources if resource.kind == "ceph-osd")
+    guest_total = sum(1 for resource in profile.resources if resource.kind in {"qemu", "lxc"})
 
     cluster_fw = _empty_firewall_scope(
         options={
@@ -716,23 +1020,52 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
             "status_current": {"quorate": 1, "mode": "active"},
             "manager_status": {"manager_status": "active", "quorum": "OK"},
         },
+        "backup_jobs": {
+            (f"backup-{index}" if index else "backup-daily"): {
+                "id": f"backup-{index}" if index else "backup-daily",
+                "schedule": f"{index * 2} 2 * * *",
+                "storage": "local" if index % 2 == 0 else "ceph",
+                "enabled": 1,
+                "all": 0,
+                "vmid": ",".join(
+                    guest
+                    for _, guest in (
+                        qemu_guests[index * 3 : index * 3 + 3] or qemu_guests[:1] or [("x", "100")]
+                    )
+                ),
+                "mode": "snapshot",
+                "compress": "zstd",
+                "comment": f"Seeded backup job #{index}",
+            }
+            for index in range(max(int(scale.get("backup_jobs", 1)), 0))
+            if qemu_guests or profile.name == "lab"
+        },
         "ha_groups": {
-            "primary": {
+            name: {
                 "nodes": ha_nodes,
-                "nofailback": 0,
+                "nofailback": 1 if index else 0,
                 "restricted": 0,
-                "comment": "Default HA group",
-            },
-            "critical-services": {
-                "nodes": ha_nodes,
-                "nofailback": 1,
-                "restricted": 0,
-                "comment": "Critical services",
-            },
+                "comment": f"HA group {name}",
+            }
+            for index, name in enumerate(
+                (
+                    "primary",
+                    "critical-services",
+                    "batch",
+                    "gpu",
+                    "edge",
+                    "dr",
+                )[: max(int(scale.get("ha_groups", 2)), 1)]
+            )
         },
         "ha_rules": [
             {"rule": "node-fencing", "type": "node", "action": "restart"},
             {"rule": "service-ha", "type": "resource", "action": "failover"},
+            *(
+                [{"rule": "affinity-primary", "type": "resource", "action": "prefer-primary"}]
+                if int(scale.get("ha_groups", 2)) > 2
+                else []
+            ),
         ],
         "sdn": {
             "zones": {
@@ -744,6 +1077,10 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
                     "vrf": "vrf-public",
                     "table": 100,
                     "mtu": 1500,
+                    "nodes": ",".join(node_names),
+                    "digest": "sdnzonepublic",
+                    "pending": False,
+                    "state": "available",
                     "comment": "Public zone",
                 },
                 "internal": {
@@ -754,16 +1091,24 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
                     "vrf": "vrf-internal",
                     "table": 101,
                     "vlan-protocol": "802.1q",
+                    "nodes": ",".join(node_names),
+                    "digest": "sdnzoneinternal",
+                    "pending": False,
+                    "state": "available",
                     "comment": "Internal VLAN zone",
                 },
             },
             "vnets": {
                 "vnet0": {
                     "vnet": "vnet0",
+                    "type": "vnet",
                     "zone": "public",
                     "alias": "Public VNet",
                     "mac-vrf": "macvrf-vnet0",
                     "tag": 0,
+                    "digest": "sdnvnet0",
+                    "pending": False,
+                    "state": "available",
                     "subnets": {
                         "10.0.0.0/24": {
                             "subnet": "10.0.0.0/24",
@@ -788,10 +1133,14 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
                 },
                 "vnet1": {
                     "vnet": "vnet1",
+                    "type": "vnet",
                     "zone": "internal",
                     "alias": "Internal VNet",
                     "mac-vrf": "macvrf-vnet1",
                     "tag": 100,
+                    "digest": "sdnvnet1",
+                    "pending": False,
+                    "state": "available",
                     "subnets": {
                         "10.10.0.0/24": {
                             "subnet": "10.10.0.0/24",
@@ -808,7 +1157,7 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
                     "controller": "evpn1",
                     "type": "evpn",
                     "asn": 65000,
-                    "peers": secondary,
+                    "peers": secondary if multi_node else primary,
                     "comment": "EVPN controller",
                 }
             },
@@ -943,6 +1292,7 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
                     "contact": ["mailto:admin@example.local"],
                     "directory": "https://acme-v02.api.letsencrypt.org/directory",
                     "location": "https://acme.example.local/acct/letsencrypt",
+                    "tos_url": "https://acme-v02.api.letsencrypt.org/directory/tos",
                 }
             },
             "plugins": {
@@ -952,6 +1302,7 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
                     "api": "CF",
                     "data": {"CF_Token": "seed-cf-token"},
                     "validation-delay": 30,
+                    "digest": "seedacmeplugin00000000000000000000000001",
                 }
             },
             "directories": [
@@ -1008,33 +1359,19 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
                 }
             },
         },
-        "replication": [
-            {
-                "id": f"{replication_guest}-0",
-                "guest": replication_guest,
-                "target": secondary,
-                "type": "local",
-                "schedule": "*/15",
-                "rate": 100,
-                "comment": f"Replicate VM/CT {replication_guest} to {secondary}",
-                "enabled": 1,
-                "source": primary,
-                "state": "OK",
-                "last_sync": 1720000200,
-                "duration": 12,
-                "fail_count": 0,
-                "error": "",
-                "log": [
-                    {
-                        "t": 1720000200,
-                        "n": 0,
-                        "msg": f"replication ok for {replication_guest}-0",
-                    }
-                ],
-            }
-        ],
+        "replication": _replication_seed_jobs(
+            profile.name,
+            qemu_guests=qemu_guests,
+            node_names=node_names,
+            primary=primary,
+            secondary=secondary,
+            multi_node=multi_node,
+        ),
         "metrics": {
-            "export_data": '# HELP pve_up Node is up\npve_up{node="pve01"} 1\n',
+            "export_data": (
+                "# HELP pve_up Node is up\n"
+                + "".join(f'pve_up{{node="{name}"}} 1\n' for name in node_names)
+            ),
             "servers": {
                 "influx": {
                     "id": "influx",
@@ -1097,63 +1434,43 @@ def cluster_domain_metadata(profile: SeedProfile) -> dict[str, object]:
             "cfg_raw": "[global]\nfsid = pve-simulator-fsid\nauth_client_required = cephx\n",
             "cfg_values": {},
             "pools": {
-                "rbd": {
-                    "pool": "rbd",
+                name: {
+                    "pool_id": index,
+                    "pool_name": name,
                     "size": 3,
                     "min_size": 2,
-                    "pg_num": 128,
-                    "application": "rbd",
-                    "crush_rule": "replicated_rule",
-                    "bytes_used": 12_000_000_000,
-                    "percent_used": 12.0,
+                    "pg_num": max(32, min((osd_count or 1) * 32, 8192)),
+                    "application": "rbd" if name == "rbd" else "cephfs",
+                    "application_metadata": {"rbd": {}} if name == "rbd" else {"cephfs": {}},
+                    "crush_rule": 0,
+                    "crush_rule_name": "replicated_rule",
+                    "bytes_used": max(guest_total, 1) * (8 + index * 4) * 1024**3,
+                    "percent_used": min(5.0 + guest_total / 50.0, 75.0),
                     "healthy": True,
                 }
+                for index, name in enumerate(
+                    ("rbd", "cephfs_data", "cephfs_metadata")[
+                        : (1 if osd_count < 10 else 2 if osd_count < 100 else 3)
+                    ]
+                )
             },
             "fs": {},
             "rules": [{"name": "replicated_rule", "id": 0}],
-            "crush": "device 0 osd.0 class hdd\n",
+            "crush": "".join(
+                f"device {index} osd.{index} class hdd\n" for index in range(max(osd_count, 1))
+            ),
             "cmd_safety": {"safe": 1},
-            "flags": {
-                "nobackfill": 0,
-                "nodeep-scrub": 0,
-                "nodown": 0,
-                "noin": 0,
-                "noout": 0,
-                "norebalance": 0,
-                "norecover": 0,
-                "noscrub": 0,
-                "notieragent": 0,
-                "pause": 0,
-            },
+            "health": {"status": "HEALTH_OK"},
+            "flags": default_ceph_flags(),
         },
-        "cluster_config": {
-            "clustername": f"pve-{profile.name}",
-            "votes": 1,
-            "links": {},
-            "join_info": {},
-            "totem": {
-                "version": 2,
-                "secauth": "on",
-                "cluster_name": f"pve-{profile.name}",
-            },
-            "qdevice": {"status": "disabled"},
-            "apiversion": 1,
-            "added_nodes": {
-                node_name: {
-                    "node": node_name,
-                    "ring0_addr": f"{node_name}.local",
-                    "quorum_votes": 1,
-                }
-                for node_name in node_names
-            },
-        },
+        "cluster_config": _seed_cluster_config(profile.name, node_names),
     }
 
 
-def _seed_resource_state(resource: SeedResource) -> dict[str, object]:
+def _seed_resource_state(resource: SeedResource, *, slim: bool = False) -> dict[str, object]:
     if resource.kind in {"qemu", "lxc"}:
         return enrich_guest_state(
-            dict(resource.state), kind=resource.kind, vmid=resource.external_id
+            dict(resource.state), kind=resource.kind, vmid=resource.external_id, slim=slim
         )
     if resource.kind == "storage":
         return enrich_storage_state(dict(resource.state), storage_id=resource.external_id)
@@ -1183,17 +1500,273 @@ def _resource(
     return SeedResource(stable_id(f"{kind}:{external_id}"), node.id, kind, external_id, state)
 
 
-def _completed_task(index: int, task_type: str, resource_id: str) -> SeedTask:
+def _completed_task(
+    index: int,
+    task_type: str,
+    resource_id: str,
+    *,
+    node: str = "pve01",
+) -> SeedTask:
+    pid = index & 0xFFFFFFFF
+    start = (0x65000000 + index) & 0xFFFFFFFF
     return SeedTask(
-        stable_id(f"task:{index}:{task_type}:{resource_id}"),
-        f"UPID:pve01:0000000{index}:0000000{index}:6500000{index}:"
-        f"{task_type}:{resource_id}:root@pam:",
+        stable_id(f"task:{index}:{task_type}:{resource_id}:{node}"),
+        (f"UPID:{node}:{pid:08X}:{pid:08X}:{start:08X}:{task_type}:{resource_id}:root@pam:"),
         task_type,
-        {"resource_id": resource_id, "seeded": True},
+        {"resource_id": resource_id, "node": node, "seeded": True},
     )
 
 
-def small_profile() -> SeedProfile:
+def _storage_resource(
+    node: SeedNode,
+    storage_id: str,
+    *,
+    content: list[str],
+    total_bytes: int,
+    used_bytes: int,
+    plugintype: str,
+    shared: bool = False,
+) -> SeedResource:
+    return _resource(
+        node,
+        "storage",
+        storage_id,
+        {
+            "content": content,
+            "status": "available",
+            "shared": shared,
+            "total_bytes": total_bytes,
+            "used_bytes": used_bytes,
+            "plugintype": plugintype,
+            "disk": used_bytes,
+            "maxdisk": total_bytes,
+        },
+    )
+
+
+def _ceph_osd_resource(node: SeedNode, osd_id: int) -> SeedResource:
+    return _resource(
+        node,
+        "ceph-osd",
+        f"osd.{osd_id}",
+        {
+            "osd_id": osd_id,
+            "status": "up",
+            "in": 1,
+            "weight": 1.0,
+            "device_class": "hdd",
+            "dev": f"/dev/disk/by-id/ceph-osd-{osd_id:04d}",
+        },
+    )
+
+
+def _distribute_count(total: int, buckets: int) -> list[int]:
+    """Spread ``total`` items across ``buckets`` as evenly as possible."""
+
+    if buckets <= 0 or total <= 0:
+        return [0] * max(buckets, 0)
+    base, rem = divmod(total, buckets)
+    return [base + (1 if index < rem else 0) for index in range(buckets)]
+
+
+def _cluster_infra(
+    nodes: tuple[SeedNode, ...],
+    *,
+    include_ceph: bool = True,
+    osd_count: int = 0,
+    osds_per_node: int | None = None,
+    ha_sids: tuple[str, ...] = (),
+    pool_id: str | None = None,
+    pool_members: tuple[str, ...] = (),
+    guest_count: int = 50,
+) -> list[SeedResource]:
+    """Shared storages / Ceph OSDs / HA / pool rows for multi-node profiles.
+
+    ``storages.storage_id`` is unique cluster-wide, so ``local`` / ``local-lvm`` /
+    ``ceph`` are seeded once (standard PVE names). Node storage list and
+    ``/cluster/resources`` expand them onto every node.
+    """
+
+    resources: list[SeedResource] = []
+    if not nodes:
+        return resources
+    primary = nodes[0]
+    if osds_per_node is not None and osd_count <= 0:
+        osd_count = max(osds_per_node, 0) * len(nodes)
+    # Scale capacity with guest + OSD count so dumps stay realistic.
+    local_total = max(200 * 1024**3, guest_count * 4 * 1024**3)
+    local_used = local_total // 5
+    lvm_total = max(800 * 1024**3, guest_count * 40 * 1024**3)
+    lvm_used = lvm_total // 6
+    ceph_total = max(
+        max(osd_count, 1) * 2 * 1024**4,
+        len(nodes) * 2 * 1024**4,
+        guest_count * 64 * 1024**3,
+    )
+    ceph_used = max(
+        max(osd_count, 1) * 200 * 1024**3,
+        len(nodes) * 200 * 1024**3,
+        guest_count * 8 * 1024**3,
+    )
+    resources.append(
+        _storage_resource(
+            primary,
+            "local",
+            content=["iso", "backup", "vztmpl", "images"],
+            total_bytes=local_total,
+            used_bytes=local_used,
+            plugintype="dir",
+        )
+    )
+    resources.append(
+        _storage_resource(
+            primary,
+            "local-lvm",
+            content=["images", "rootdir"],
+            total_bytes=lvm_total,
+            used_bytes=lvm_used,
+            plugintype="lvmthin",
+        )
+    )
+    if include_ceph:
+        resources.append(
+            _storage_resource(
+                primary,
+                "ceph",
+                content=["images", "rootdir"],
+                total_bytes=ceph_total,
+                used_bytes=ceph_used,
+                plugintype="rbd",
+                shared=True,
+            )
+        )
+        per_node = _distribute_count(max(osd_count, 0), len(nodes))
+        osd_id = 0
+        for node, node_osds in zip(nodes, per_node, strict=True):
+            for _ in range(node_osds):
+                resources.append(_ceph_osd_resource(node, osd_id))
+                osd_id += 1
+    for sid in ha_sids:
+        guest_kind, _, _guest_id = sid.partition(":")
+        resources.append(
+            _resource(
+                primary,
+                "ha",
+                sid,
+                {"state": "started", "group": "primary", "type": guest_kind or "vm"},
+            )
+        )
+    if pool_id:
+        resources.append(
+            _resource(
+                primary,
+                "pool",
+                pool_id,
+                {"members": list(pool_members), "comment": f"Pool {pool_id}"},
+            )
+        )
+    return resources
+
+
+def _seed_tasks_for_guests(
+    nodes: tuple[SeedNode, ...],
+    guest_ids: list[tuple[str, str]],
+    *,
+    limit: int = 20,
+) -> tuple[SeedTask, ...]:
+    """Create completed tasks bound to the guest's real node name."""
+
+    tasks: list[SeedTask] = []
+    for index, (node_name, vmid) in enumerate(guest_ids[:limit], start=1):
+        tasks.append(_completed_task(index, "qmstart", vmid, node=node_name))
+    return tuple(tasks)
+
+
+# UI / ops cluster sizes (hosts × total guests). Infra scales with the size.
+_CLUSTER_SIZE_SPECS: dict[str, dict[str, int]] = {
+    "lab": {
+        "nodes": 1,
+        "guests": 3,
+        "osds": 3,
+        "ha": 1,
+        "tasks": 2,
+        "pool_members": 2,
+        "replication": 0,
+        "backups": 2,
+        "snapshots": 2,
+        "backup_jobs": 1,
+        "ha_groups": 2,
+        "fw_guest_cap": 10_000,
+    },
+    "small": {
+        "nodes": 3,
+        "guests": 50,
+        "osds": 10,
+        "ha": 3,
+        "tasks": 12,
+        "pool_members": 12,
+        "replication": 2,
+        "backups": 10,
+        "snapshots": 12,
+        "backup_jobs": 2,
+        "ha_groups": 2,
+        "fw_guest_cap": 10_000,
+    },
+    "large": {
+        "nodes": 10,
+        "guests": 1_000,
+        "osds": 100,
+        "ha": 12,
+        "tasks": 50,
+        "pool_members": 50,
+        "replication": 8,
+        "backups": 80,
+        "snapshots": 100,
+        "backup_jobs": 4,
+        "ha_groups": 4,
+        "fw_guest_cap": 256,
+    },
+    "big": {
+        "nodes": 20,
+        "guests": 2_000,
+        "osds": 500,
+        "ha": 24,
+        "tasks": 100,
+        "pool_members": 100,
+        "replication": 16,
+        "backups": 160,
+        "snapshots": 200,
+        "backup_jobs": 6,
+        "ha_groups": 6,
+        "fw_guest_cap": 384,
+    },
+}
+
+
+def _size_spec(profile_name: str) -> dict[str, int]:
+    if profile_name in _CLUSTER_SIZE_SPECS:
+        return dict(_CLUSTER_SIZE_SPECS[profile_name])
+    if profile_name in {"medium", "ha-demo"}:
+        return dict(_CLUSTER_SIZE_SPECS["small"])
+    return {
+        "nodes": 1,
+        "guests": 0,
+        "osds": 0,
+        "ha": 0,
+        "tasks": 0,
+        "pool_members": 0,
+        "replication": 0,
+        "backups": 0,
+        "snapshots": 0,
+        "backup_jobs": 0,
+        "ha_groups": 1,
+        "fw_guest_cap": 10_000,
+    }
+
+
+def lab_profile() -> SeedProfile:
+    """Single-node fixture used by unit/surface tests (not a DATA UI button)."""
+
     node = _node("pve01")
     resources = (
         _resource(
@@ -1226,73 +1799,202 @@ def small_profile() -> SeedProfile:
                 "agent": {"files": {"/etc/hostname": "service\n"}},
             },
         ),
-        _resource(node, "storage", "local", {"content": ["iso", "backup"], "status": "available"}),
         _resource(
-            node, "storage", "local-lvm", {"content": ["images", "rootdir"], "status": "available"}
+            node,
+            "storage",
+            "local",
+            {
+                "content": ["iso", "backup", "vztmpl"],
+                "status": "available",
+                "total_bytes": 100 * 1024**3,
+                "used_bytes": 12 * 1024**3,
+                "plugintype": "dir",
+                "disk": 12 * 1024**3,
+                "maxdisk": 100 * 1024**3,
+            },
+        ),
+        _resource(
+            node,
+            "storage",
+            "local-lvm",
+            {
+                "content": ["images", "rootdir"],
+                "status": "available",
+                "total_bytes": 500 * 1024**3,
+                "used_bytes": 64 * 1024**3,
+                "plugintype": "lvmthin",
+                "disk": 64 * 1024**3,
+                "maxdisk": 500 * 1024**3,
+            },
+        ),
+        _resource(
+            node,
+            "storage",
+            "ceph",
+            {
+                "content": ["images", "rootdir"],
+                "status": "available",
+                "shared": True,
+                "total_bytes": 3 * 1024**4,
+                "used_bytes": 120 * 1024**3,
+                "plugintype": "rbd",
+                "disk": 120 * 1024**3,
+                "maxdisk": 3 * 1024**4,
+            },
+        ),
+        _resource(node, "pool", "lab", {"members": ["100", "200"], "comment": "Lab pool"}),
+        _resource(node, "ha", "vm:100", {"state": "started", "group": "primary"}),
+        *(
+            _resource(
+                node,
+                "ceph-osd",
+                f"osd.{index}",
+                {
+                    "osd_id": index,
+                    "status": "up",
+                    "in": 1,
+                    "weight": 1.0,
+                    "device_class": "hdd",
+                    "dev": f"/dev/sd{chr(ord('b') + index)}",
+                },
+            )
+            for index in range(3)
         ),
     )
     tasks = (_completed_task(1, "qmstart", "100"), _completed_task(2, "qmstop", "100"))
-    return SeedProfile("small", (node,), resources, tasks)
+    return SeedProfile("lab", (node,), resources, tasks)
+
+
+def _sized_cluster_profile(name: str, *, overrides: dict[str, int] | None = None) -> SeedProfile:
+    """Build a proportional multi-node cluster (small / large / big)."""
+
+    spec = dict(_CLUSTER_SIZE_SPECS[name])
+    if overrides:
+        spec.update(overrides)
+    node_count = int(spec["nodes"])
+    guest_count = int(spec["guests"])
+    nodes = tuple(_node(f"pve{index}") for index in range(1, node_count + 1))
+    guests: list[SeedResource] = []
+    guest_pairs: list[tuple[str, str]] = []
+    ha_sids: list[str] = []
+    for index in range(guest_count):
+        node = nodes[index % node_count]
+        # ~75% qemu / ~25% lxc
+        kind = "lxc" if index % 4 == 0 else "qemu"
+        vmid = str(100 + index)
+        status = "running" if index % 7 == 0 else "stopped"
+        guests.append(_resource(node, kind, vmid, {"name": f"guest-{vmid}", "status": status}))
+        if kind == "qemu" and len(guest_pairs) < max(int(spec["tasks"]), 1):
+            guest_pairs.append((node.name, vmid))
+        if len(ha_sids) < int(spec["ha"]):
+            if kind == "lxc":
+                ha_sids.append(f"ct:{vmid}")
+            elif index % 3 == 1:
+                ha_sids.append(f"vm:{vmid}")
+    for index in range(guest_count):
+        if len(ha_sids) >= int(spec["ha"]):
+            break
+        if index % 4 == 0:
+            continue
+        sid = f"vm:{100 + index}"
+        if sid not in ha_sids:
+            ha_sids.append(sid)
+
+    pool_members = tuple(
+        str(100 + index) for index in range(min(int(spec["pool_members"]), guest_count))
+    )
+    pool_id = {"small": "development", "large": "production", "big": "production"}[name]
+    infra = _cluster_infra(
+        nodes,
+        osd_count=int(spec["osds"]),
+        ha_sids=tuple(ha_sids[: int(spec["ha"])]),
+        pool_id=pool_id,
+        pool_members=pool_members,
+        guest_count=guest_count,
+    )
+    # Extra pools for larger sizes (members are disjoint samples).
+    if name == "large" and int(spec["guests"]) >= 1_000:
+        infra.append(
+            _resource(
+                nodes[0],
+                "pool",
+                "staging",
+                {
+                    "members": [str(100 + index) for index in range(20, 40)],
+                    "comment": "Pool staging",
+                },
+            )
+        )
+    elif name == "big":
+        infra.extend(
+            [
+                _resource(
+                    nodes[0],
+                    "pool",
+                    "staging",
+                    {
+                        "members": [str(100 + index) for index in range(40, 70)],
+                        "comment": "Pool staging",
+                    },
+                ),
+                _resource(
+                    nodes[0],
+                    "pool",
+                    "development",
+                    {
+                        "members": [str(100 + index) for index in range(70, 100)],
+                        "comment": "Pool development",
+                    },
+                ),
+            ]
+        )
+    tasks = _seed_tasks_for_guests(nodes, guest_pairs, limit=int(spec["tasks"]))
+    return SeedProfile(name, nodes, tuple(guests) + tuple(infra), tasks)
+
+
+def small_profile() -> SeedProfile:
+    """DATA UI: 3 hosts × 50 guests."""
+
+    return _sized_cluster_profile("small")
+
+
+def large_profile(*, node_count: int = 10, resource_count: int = 1_000) -> SeedProfile:
+    """DATA UI: 10 hosts × 1000 guests (overrides allowed for CLI stress)."""
+
+    if node_count < 1 or resource_count < 1:
+        raise ValueError("large profile counts must be positive")
+    if node_count == 10 and resource_count == 1_000:
+        return _sized_cluster_profile("large")
+    scale = max(resource_count / 1_000, node_count / 10)
+    return _sized_cluster_profile(
+        "large",
+        overrides={
+            "nodes": node_count,
+            "guests": resource_count,
+            "osds": max(10, int(round(100 * scale))),
+            "ha": max(3, int(round(12 * scale))),
+            "tasks": max(12, int(round(50 * scale))),
+            "pool_members": max(12, min(resource_count, int(round(50 * scale)))),
+        },
+    )
+
+
+def big_profile() -> SeedProfile:
+    """DATA UI: 20 hosts × 2000 guests."""
+
+    return _sized_cluster_profile("big")
 
 
 def medium_profile() -> SeedProfile:
-    nodes = tuple(_node(f"pve{index}") for index in range(1, 4))
-    resources: list[SeedResource] = []
-    for vmid in range(100, 150):
-        node = nodes[(vmid - 100) % len(nodes)]
-        resources.append(
-            _resource(node, "qemu", str(vmid), {"name": f"vm-{vmid}", "status": "stopped"})
-        )
-    for vmid in range(200, 220):
-        node = nodes[(vmid - 200) % len(nodes)]
-        resources.append(
-            _resource(node, "lxc", str(vmid), {"name": f"ct-{vmid}", "status": "stopped"})
-        )
-    for node in nodes:
-        resources.append(
-            _resource(
-                node,
-                "storage",
-                f"local-{node.name}",
-                {"content": ["images"], "shared": False, "status": "available"},
-            )
-        )
-    resources.append(
-        _resource(
-            nodes[0],
-            "storage",
-            "shared",
-            {"content": ["images", "backup"], "shared": True, "status": "available"},
-        )
-    )
-    resources.append(_resource(nodes[0], "pool", "development", {"members": ["100", "101", "200"]}))
-    tasks = tuple(_completed_task(index, "qmstart", str(99 + index)) for index in range(1, 11))
-    return SeedProfile("medium", nodes, tuple(resources), tasks)
+    """Compatibility alias for the small (3×50) cluster."""
 
-
-def large_profile(*, node_count: int = 10, resource_count: int = 10_000) -> SeedProfile:
-    if node_count < 1 or resource_count < 1:
-        raise ValueError("large profile counts must be positive")
-    nodes = tuple(_node(f"pve{index}") for index in range(1, node_count + 1))
-    resources = tuple(
-        _resource(
-            nodes[index % node_count],
-            "qemu" if index % 4 else "lxc",
-            str(100 + index),
-            {"name": f"guest-{100 + index}", "status": "stopped"},
-        )
-        for index in range(resource_count)
-    )
-    return SeedProfile("large", nodes, resources)
+    profile = small_profile()
+    return SeedProfile("medium", profile.nodes, profile.resources, profile.tasks)
 
 
 def ha_demo_profile() -> SeedProfile:
-    profile = medium_profile()
-    resources = (
-        *profile.resources,
-        _resource(profile.nodes[0], "ha", "vm:100", {"state": "started", "group": "primary"}),
-    )
-    return SeedProfile("ha-demo", profile.nodes, resources, profile.tasks)
+    profile = small_profile()
+    return SeedProfile("ha-demo", profile.nodes, profile.resources, profile.tasks)
 
 
 def minimal_profile() -> SeedProfile:
@@ -1307,7 +2009,7 @@ def minimal_profile() -> SeedProfile:
 
 
 def broken_storage_profile() -> SeedProfile:
-    profile = small_profile()
+    profile = lab_profile()
     resources = tuple(
         _resource(
             next(node for node in profile.nodes if node.id == resource.node_id),
@@ -1322,15 +2024,17 @@ def broken_storage_profile() -> SeedProfile:
     return SeedProfile("broken-storage", profile.nodes, resources, profile.tasks)
 
 
-def build_profile(
-    name: str, *, large_nodes: int = 10, large_resources: int = 10_000
-) -> SeedProfile:
+def build_profile(name: str, *, large_nodes: int = 10, large_resources: int = 1_000) -> SeedProfile:
+    if name == "lab":
+        return lab_profile()
     if name == "small":
         return small_profile()
     if name == "medium":
         return medium_profile()
     if name == "large":
         return large_profile(node_count=large_nodes, resource_count=large_resources)
+    if name == "big":
+        return big_profile()
     if name == "ha-demo":
         return ha_demo_profile()
     if name == "broken-storage":
@@ -1355,7 +2059,7 @@ def _storage_type(resource: SeedResource) -> str:
             return "zfspool"
         return "dir"
     if resource.external_id.startswith("ceph"):
-        return "ceph"
+        return "rbd"
     if resource.external_id.startswith("nfs"):
         return "nfs"
     return "dir"
@@ -1373,7 +2077,7 @@ async def clear_simulation_state(connection: Connection) -> None:
     """Remove all mutable simulator state so a seed/reset never fails on leftovers.
 
     API-created guests, storages, users, groups, roles, ACL/tokens and custom
-    realms must not block "Remove demo data" / reseed. Builtin auth realms
+    realms must not block "Reset to minimal" / reseed. Builtin auth realms
     (`pam`, `pve`, `test`) are kept because principals reference them.
     """
     for statement in (
@@ -1435,7 +2139,12 @@ async def simulation_state_summary(connection: Connection) -> dict[str, object]:
             (SELECT count(*)::int FROM snapshots) AS snapshots,
             (SELECT count(*)::int FROM principals) AS principals,
             COALESCE(
-                (SELECT sum(capacity_bytes)::bigint FROM storages WHERE storage_type = 'ceph'),
+                (
+                    SELECT sum(capacity_bytes)::bigint
+                    FROM storages
+                    WHERE storage_type IN ('ceph', 'rbd')
+                       OR storage_id LIKE 'ceph%'
+                ),
                 0
             ) AS ceph_capacity_bytes
         FROM clusters c
@@ -1445,7 +2154,7 @@ async def simulation_state_summary(connection: Connection) -> dict[str, object]:
     if row is None:
         return {"profile": "unknown", "loaded": False}
     payload = dict(row)
-    payload["loaded"] = payload["profile"] == "demo-cluster"
+    payload["loaded"] = payload["profile"] in {"small", "large", "big", "demo-cluster"}
     payload["ceph_capacity_pib"] = round((payload.get("ceph_capacity_bytes") or 0) / 1024**5, 2)
     return payload
 
@@ -1471,6 +2180,13 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
                 sort_keys=True,
             ),
         )
+        slim_guests = profile.name in {"large", "big"}
+        osd_counts_by_node: dict[uuid.UUID, int] = {}
+        for resource in profile.resources:
+            if resource.kind == "ceph-osd":
+                osd_counts_by_node[resource.node_id] = (
+                    osd_counts_by_node.get(resource.node_id, 0) + 1
+                )
         await connection.executemany(
             "INSERT INTO nodes(id, name, status, metadata) VALUES($1, $2, $3, $4::jsonb)",
             [
@@ -1478,9 +2194,19 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
                     node.id,
                     node.name,
                     node.status,
-                    json.dumps({"ops": default_node_ops_for_seed(node.name)}, sort_keys=True),
+                    json.dumps(
+                        {
+                            "ops": default_node_ops_for_seed(
+                                node.name,
+                                node_index=index,
+                                node_count=len(profile.nodes),
+                                osds_per_node=int(osd_counts_by_node.get(node.id, 0)),
+                            )
+                        },
+                        sort_keys=True,
+                    ),
                 )
-                for node in profile.nodes
+                for index, node in enumerate(profile.nodes)
             ],
         )
         await connection.executemany(
@@ -1492,7 +2218,7 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
                     resource.node_id,
                     resource.kind,
                     resource.external_id,
-                    json.dumps(_seed_resource_state(resource), sort_keys=True),
+                    json.dumps(_seed_resource_state(resource, slim=slim_guests), sort_keys=True),
                 )
                 for resource in profile.resources
             ],
@@ -1506,7 +2232,9 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
                     (
                         resource.id,
                         int(resource.external_id),
-                        json.dumps(_seed_resource_state(resource), sort_keys=True),
+                        json.dumps(
+                            _seed_resource_state(resource, slim=slim_guests), sort_keys=True
+                        ),
                     )
                     for resource in qemu
                 ],
@@ -1520,7 +2248,9 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
                     (
                         resource.id,
                         int(resource.external_id),
-                        json.dumps(_seed_resource_state(resource), sort_keys=True),
+                        json.dumps(
+                            _seed_resource_state(resource, slim=slim_guests), sort_keys=True
+                        ),
                     )
                     for resource in containers
                 ],
@@ -1540,7 +2270,9 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
                         _storage_type(resource),
                         bool(resource.state.get("shared", False)),
                         *_storage_capacity(resource),
-                        json.dumps(_seed_resource_state(resource), sort_keys=True),
+                        json.dumps(
+                            _seed_resource_state(resource, slim=slim_guests), sort_keys=True
+                        ),
                     )
                     for resource in storages
                 ],
@@ -1713,6 +2445,94 @@ async def apply_seed(connection: Connection, profile: SeedProfile) -> None:
             )
         if profile.name == "demo-cluster":
             await _apply_demo_cluster_extras(connection, profile)
+        elif profile.name in {"lab", "small", "large", "big", "medium", "ha-demo"}:
+            await _seed_profile_artifacts(connection, profile)
+
+
+async def _seed_profile_artifacts(connection: Connection, profile: SeedProfile) -> None:
+    """Proportional backups / snapshots / task logs for DATA cluster sizes."""
+
+    scale = _size_spec(profile.name)
+    names = {node.id: node.name for node in profile.nodes}
+    guests = [resource for resource in profile.resources if resource.kind in {"qemu", "lxc"}]
+    if not guests:
+        return
+
+    backup_limit = min(int(scale.get("backups", 0)), len(guests))
+    snap_limit = min(int(scale.get("snapshots", 0)), len(guests))
+    storage_rows = await connection.fetch(
+        """SELECT s.resource_id, s.storage_id FROM storages s
+        WHERE s.storage_id IN ('local', 'ceph') ORDER BY s.storage_id"""
+    )
+    storage_by_id = {str(row["storage_id"]): row["resource_id"] for row in storage_rows}
+    fallback = storage_by_id.get("local") or storage_by_id.get("ceph")
+    if fallback is not None and backup_limit:
+        backups: list[tuple[uuid.UUID, uuid.UUID, uuid.UUID, str, int, str]] = []
+        for index, resource in enumerate(guests[:backup_limit]):
+            storage_id = "ceph" if index % 3 == 0 and "ceph" in storage_by_id else "local"
+            storage_resource = storage_by_id.get(storage_id, fallback)
+            volume_id = (
+                f"{storage_id}:backup/vzdump-{resource.kind}-{resource.external_id}"
+                f"-2026_07_18-{index:04d}.vma.zst"
+            )
+            backups.append(
+                (
+                    stable_id(f"backup:{profile.name}:{resource.external_id}:{index}"),
+                    resource.id,
+                    storage_resource,
+                    volume_id,
+                    (4 + (index % 20)) * 1024**3,
+                    json.dumps(
+                        {
+                            "mode": "snapshot",
+                            "node": names[resource.node_id],
+                            "notes-template": "{{guestname}}",
+                        },
+                        sort_keys=True,
+                    ),
+                )
+            )
+        if backups:
+            await connection.executemany(
+                """INSERT INTO backups(
+                    id, resource_id, storage_resource_id, volume_id, size_bytes, metadata
+                ) VALUES($1, $2, $3, $4, $5, $6::jsonb)""",
+                backups,
+            )
+
+    if snap_limit:
+        snapshots: list[tuple[uuid.UUID, uuid.UUID, str, str | None, str, str]] = []
+        for index, resource in enumerate(guests[:snap_limit]):
+            snap_name = "baseline"
+            snapshots.append(
+                (
+                    stable_id(f"snapshot:{profile.name}:{resource.external_id}:{snap_name}"),
+                    resource.id,
+                    snap_name,
+                    None,
+                    "Seeded snapshot",
+                    json.dumps({"vmstate": index % 2 == 0}, sort_keys=True),
+                )
+            )
+        if snapshots:
+            await connection.executemany(
+                """INSERT INTO snapshots(id, resource_id, name, parent_name, description, state)
+                VALUES($1, $2, $3, $4, $5, $6::jsonb)""",
+                snapshots,
+            )
+
+    if profile.tasks:
+        logs: list[tuple[uuid.UUID, str]] = []
+        for task_index, task in enumerate(profile.tasks, start=1):
+            for message in (f"starting {task.task_type}", f"finished {task.task_type} OK"):
+                logs.append((task.id, message))
+            if task_index >= 40:
+                break
+        if logs:
+            await connection.executemany(
+                "INSERT INTO task_logs(task_id, message) VALUES($1, $2)",
+                logs,
+            )
 
 
 async def _apply_demo_cluster_extras(connection: Connection, profile: SeedProfile) -> None:

@@ -583,6 +583,123 @@
       padding-top: 2px;
     }
 
+    .demo-size-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 4px;
+    }
+
+    @media (max-width: 900px) {
+      .demo-size-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .demo-size-card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 14px 14px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background:
+        linear-gradient(165deg, color-mix(in srgb, var(--brand-accent) 8%, var(--surface-raised)) 0%, var(--surface-raised) 55%);
+      min-height: 168px;
+    }
+
+    .demo-size-card.is-active {
+      border-color: color-mix(in srgb, var(--brand-accent) 55%, var(--border));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-accent) 25%, transparent);
+    }
+
+    .demo-size-card-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .demo-size-card-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      color: var(--text);
+      text-transform: capitalize;
+    }
+
+    .demo-size-card-chip {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--brand-accent);
+      background: color-mix(in srgb, var(--brand-accent) 12%, transparent);
+      border-radius: 999px;
+      padding: 3px 8px;
+      white-space: nowrap;
+    }
+
+    .demo-size-card-metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 10px;
+      margin: 0;
+    }
+
+    .demo-size-card-metrics div {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .demo-size-card-metrics dt {
+      margin: 0;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    .demo-size-card-metrics dd {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .demo-size-card-note {
+      margin: 0;
+      font-size: 11px;
+      line-height: 1.4;
+      color: var(--muted);
+      flex: 1;
+    }
+
+    .demo-size-card .btn-demo-load {
+      width: 100%;
+      justify-content: center;
+      margin-top: auto;
+    }
+
+    .demo-toolbar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      width: 100%;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .demo-toolbar .btn {
+      width: 100%;
+      box-sizing: border-box;
+      justify-content: center;
+      text-align: center;
+    }
+
     .btn-demo-load {
       background: var(--brand-accent);
       border-color: var(--brand-accent);
@@ -5371,11 +5488,45 @@
 
     function buildDemoDataHtml(data) {
       const loaded = Boolean(data?.loaded);
+      const profile = data?.profile ?? "minimal";
+      const badgeLabel = loaded ? String(profile) : "Minimal";
       const cephPiB = data?.ceph_capacity_pib;
       const cephText = cephPiB != null && cephPiB > 0 ? `${cephPiB} PiB` : "—";
       const tasksText = data?.tasks != null ? `${data.tasks} / ${data.task_logs ?? 0}` : "—";
+      const sizes = [
+        {
+          id: "small",
+          label: "Small",
+          chip: "lab",
+          hosts: 3,
+          guests: 50,
+          osd: 10,
+          backups: 10,
+          note: "3 hosts · 50 guests · 10 OSD · HA/replication light",
+        },
+        {
+          id: "large",
+          label: "Large",
+          chip: "default",
+          hosts: 10,
+          guests: 1000,
+          osd: 100,
+          backups: 80,
+          note: "10 hosts · 1000 guests · 100 OSD · fuller Ceph/HA",
+        },
+        {
+          id: "big",
+          label: "Big",
+          chip: "heavy",
+          hosts: 20,
+          guests: 2000,
+          osd: 500,
+          backups: 160,
+          note: "20 hosts · 2000 guests · 500 OSD · heavy Ceph/HA",
+        },
+      ];
       const stats = [
-        ["Profile", data?.profile ?? "—", loaded ? "ok" : ""],
+        ["Profile", profile, loaded ? "ok" : ""],
         ["Cluster", data?.cluster_name ?? "—", ""],
         ["Nodes", data?.nodes ?? "—", ""],
         ["QEMU", data?.qemu ?? "—", ""],
@@ -5390,13 +5541,12 @@
       return `
         <div class="help-demo-panel">
           <div class="help-report-head help-demo-head">
-            <h3>Demo cluster</h3>
-            <p>Load a realistic enterprise environment into the emulator database for hands-on API exploration.</p>
-            <span class="help-demo-badge ${loaded ? "loaded" : "empty"}">${loaded ? "Loaded" : "Empty"}</span>
+            <h3>Proxmox demo cluster</h3>
+            <p>Pick a cluster size — inventory (nodes, guests, Ceph, HA, backups, tasks) scales together.</p>
+            <span class="help-demo-badge ${loaded ? "loaded" : "empty"}">${escapeHtml(badgeLabel)}</span>
           </div>
           <p class="help-demo-note">
-            20 nodes · 1000 guests (850 QEMU + 150 LXC) · Ceph 300 OSD (~5 PiB) · backups, logs,
-            snapshots, pools, HA rules, and multi-level users. Loading replaces current simulation state.
+            Password for seeded users: <code>secret</code>. Loading replaces current Proxmox state.
           </p>
           <div class="help-stat-grid">
             ${stats.map(([label, value, tone]) => `
@@ -5406,9 +5556,30 @@
               </div>
             `).join("")}
           </div>
-          <div class="help-demo-actions">
-            <button class="btn btn-sm btn-demo-load" id="btn-demo-load" type="button">Load demo cluster</button>
-            <button class="btn btn-sm btn-demo-unload" id="btn-demo-unload" type="button">Remove demo data</button>
+          <div class="demo-size-grid" role="group" aria-label="Cluster sizes">
+            ${sizes.map((s) => {
+              const active = profile === s.id;
+              return `
+              <article class="demo-size-card ${active ? "is-active" : ""}" data-size-card="${s.id}">
+                <div class="demo-size-card-head">
+                  <h4 class="demo-size-card-title">${escapeHtml(s.label)}</h4>
+                  <span class="demo-size-card-chip">${escapeHtml(s.chip)}</span>
+                </div>
+                <dl class="demo-size-card-metrics">
+                  <div><dt>Hosts</dt><dd>${s.hosts}</dd></div>
+                  <div><dt>Guests</dt><dd>${s.guests}</dd></div>
+                  <div><dt>OSD</dt><dd>${s.osd}</dd></div>
+                  <div><dt>Backups</dt><dd>${s.backups}</dd></div>
+                </dl>
+                <p class="demo-size-card-note">${escapeHtml(s.note)}</p>
+                <button class="btn btn-sm btn-demo-load" data-demo-size="${s.id}" type="button">
+                  Load ${escapeHtml(s.label.toLowerCase())}
+                </button>
+              </article>`;
+            }).join("")}
+          </div>
+          <div class="demo-toolbar">
+            <button class="btn btn-sm btn-demo-unload" id="btn-demo-unload" type="button">Reset to minimal</button>
             <button class="btn btn-sm" id="btn-demo-refresh" type="button">Refresh stats</button>
           </div>
         </div>
@@ -5446,35 +5617,45 @@
       renderDemoState(await res.json());
     }
 
-    async function loadDemoData() {
-      const loadBtn = document.getElementById("btn-demo-load");
-      if (loadBtn) loadBtn.disabled = true;
+    async function loadDemoData(size = "small") {
+      const loadBtns = document.querySelectorAll("[data-demo-size]");
+      loadBtns.forEach((btn) => { btn.disabled = true; });
       setLoading(true);
       try {
-        const res = await fetch("/ui/api/demo/load", { method: "POST" });
+        const res = await fetch(`/ui/api/demo/load?profile=${encodeURIComponent(size)}`, {
+          method: "POST",
+        });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(body.detail || `Load failed: ${res.status}`);
+          const detail = Array.isArray(body.detail)
+            ? body.detail.map((d) => d.msg || d).join("; ")
+            : body.detail;
+          throw new Error(detail || `Load failed: ${res.status}`);
         }
         renderDemoState(body.summary || {});
         if (state.ticket) syncAuthCookie(state.ticket);
         refreshOverview();
-        toast("Demo cluster loaded", "ok");
+        const seed = body.summary || {};
+        const guests = (seed.qemu ?? 0) + (seed.lxc ?? 0);
+        toast(
+          `Cluster ${seed.profile || size} loaded (${seed.nodes ?? "?"} hosts · ${guests || "?"} guests)`,
+          "ok",
+        );
         if (!state.ticket) {
           toast("Sign in (root@pam / secret) to call API endpoints", "warn");
         }
       } finally {
-        if (loadBtn) loadBtn.disabled = false;
+        loadBtns.forEach((btn) => { btn.disabled = false; });
         setLoading(false);
       }
     }
 
     async function unloadDemoData() {
       const confirmed = await showConfirm({
-        title: "Remove demo data?",
-        message: "This wipes simulator DB state (demo data and anything created via the API), then reloads a minimal cluster.",
-        confirmLabel: "Remove demo data",
-        cancelLabel: "Keep demo data",
+        title: "Reset to minimal?",
+        message: "This wipes current simulator DB state (sized demo and anything created via the API), then loads the minimal cluster (1 host · 0 guests).",
+        confirmLabel: "Reset to minimal",
+        cancelLabel: "Keep current data",
         tone: "danger",
       });
       if (!confirmed) return;
@@ -5489,7 +5670,7 @@
         }
         renderDemoState(body.summary || {});
         refreshOverview();
-        toast("Demo data removed", "info");
+        toast("Reset to minimal cluster", "info");
       } finally {
         if (unloadBtn) unloadBtn.disabled = false;
         setLoading(false);
@@ -5730,17 +5911,21 @@
       if (!els.dataPanel || els.dataPanel.dataset.demoBound) return;
       els.dataPanel.dataset.demoBound = "1";
       els.dataPanel.addEventListener("click", (event) => {
-        const target = event.target.closest("#btn-demo-load, #btn-demo-unload, #btn-demo-refresh");
-        if (!target) return;
-        if (target.id === "btn-demo-load") {
-          loadDemoData().catch((error) => {
+        const loadBtn = event.target.closest("[data-demo-size]");
+        if (loadBtn) {
+          const size = loadBtn.getAttribute("data-demo-size") || "small";
+          loadDemoData(size).catch((error) => {
             showError(String(error));
-            toast("Failed to load demo data", "error");
+            toast("Failed to load cluster data", "error");
           });
-        } else if (target.id === "btn-demo-unload") {
+          return;
+        }
+        const target = event.target.closest("#btn-demo-unload, #btn-demo-refresh");
+        if (!target) return;
+        if (target.id === "btn-demo-unload") {
           unloadDemoData().catch((error) => {
             showError(String(error));
-            toast("Failed to remove demo data", "error");
+            toast("Failed to reset to minimal", "error");
           });
         } else if (target.id === "btn-demo-refresh") {
           renderDataPanel().catch((error) => showError(String(error)));
@@ -6281,12 +6466,24 @@
       }
       container.innerHTML = fields.map((f) => {
         const stored = kind === "path" ? state.pathValues[f.name] : state.bodyValues[f.name];
-        const val = stored ?? f.example ?? "";
-        const desc = f.description ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${f.description}</div>` : "";
+        const fallback = kind === "path" || !f.optional ? formatParamExample(f.example) : "";
+        const val = stored ?? fallback;
+        const hint = f.typetext || f.format || "";
+        const descParts = [];
+        if (f.description) descParts.push(f.description);
+        if (hint) descParts.push(`<code style="font-size:10px">${escapeHtml(String(hint))}</code>`);
+        if (f.template) descParts.push(`<span style="font-size:10px;color:var(--muted)">${escapeHtml(f.template)} → ${escapeHtml(f.name)}</span>`);
+        const desc = descParts.length
+          ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${descParts.join(" · ")}</div>`
+          : "";
+        const placeholderExample = formatParamExample(f.example);
+        const placeholder = f.optional && placeholderExample
+          ? ` placeholder="${placeholderExample.replaceAll('"', "&quot;")}"`
+          : "";
         return `<tr>
-          <td><code>${f.name}</code>${desc}</td>
+          <td><code>${escapeHtml(f.name)}</code>${desc}</td>
           <td>${formatParamTypeBadges(f)}</td>
-          <td><input data-field="${f.name}" data-kind="${kind}" value="${String(val).replaceAll('"', "&quot;")}"></td>
+          <td><input data-field="${escapeAttr(f.name)}" data-kind="${kind}" value="${String(val).replaceAll('"', "&quot;")}"${placeholder}></td>
         </tr>`;
       }).join("");
       container.querySelectorAll("input[data-field]").forEach((input) => {
@@ -6393,9 +6590,11 @@
           try {
             const parsed = JSON.parse(body || "{}");
             if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              const { inner } = unwrapBodyExample(parsed);
               for (const field of bodyFields) {
-                if (Object.prototype.hasOwnProperty.call(parsed, field.name)) {
-                  state.bodyValues[field.name] = String(parsed[field.name] ?? "");
+                const value = getByPath(inner, wireBodyFieldName(field.name));
+                if (value !== undefined) {
+                  state.bodyValues[field.name] = formatParamExample(value);
                 }
               }
             }
@@ -6468,31 +6667,106 @@
       return target === "cluster" ? buildClusterUrl(apiPath) : buildEmulatorUrl(apiPath);
     }
 
+    function wireBodyFieldName(name) {
+      // Contract templates use foo[n]; wire / body keys are foo0 (catalog already expands).
+      return String(name || "").includes("[n]") ? String(name).replaceAll("[n]", "0") : String(name || "");
+    }
+
+    function deepCloneJson(value) {
+      if (value == null) return value;
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function getByPath(root, path) {
+      if (!path) return root;
+      const parts = String(path).split(".");
+      let cur = root;
+      for (const part of parts) {
+        if (cur == null || typeof cur !== "object") return undefined;
+        cur = cur[part];
+      }
+      return cur;
+    }
+
+    function setByPath(root, path, value) {
+      const parts = String(path).split(".");
+      let cur = root;
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        const part = parts[i];
+        const next = parts[i + 1];
+        const wantArray = /^\d+$/.test(next);
+        if (cur[part] == null || typeof cur[part] !== "object") {
+          cur[part] = wantArray ? [] : {};
+        }
+        cur = cur[part];
+      }
+      cur[parts[parts.length - 1]] = value;
+    }
+
+    function deleteByPath(root, path) {
+      const parts = String(path).split(".");
+      let cur = root;
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        if (cur == null || typeof cur !== "object") return;
+        cur = cur[parts[i]];
+      }
+      if (cur && typeof cur === "object") delete cur[parts[parts.length - 1]];
+    }
+
+    function unwrapBodyExample(example) {
+      if (!example || typeof example !== "object" || Array.isArray(example)) {
+        return { wrapKey: null, inner: {} };
+      }
+      const keys = Object.keys(example);
+      if (
+        keys.length === 1
+        && example[keys[0]]
+        && typeof example[keys[0]] === "object"
+        && !Array.isArray(example[keys[0]])
+      ) {
+        return { wrapKey: keys[0], inner: example[keys[0]] };
+      }
+      return { wrapKey: null, inner: example };
+    }
+
+    function formatParamExample(value) {
+      if (value == null) return "";
+      if (typeof value === "object") return JSON.stringify(value);
+      return String(value);
+    }
+
     function syncBodyFromFields({ syncVisibility = true } = {}) {
       if (!state.method) return;
       const inputs = [...(els.bodyFields?.querySelectorAll("input[data-field]") || [])];
-      const body = {};
+      const example = state.method.body_example;
+      const { wrapKey, inner } = unwrapBodyExample(example);
+      const root = deepCloneJson(inner) || {};
+      let touched = false;
       inputs.forEach((input) => {
-        const name = input.dataset.field;
+        const name = wireBodyFieldName(input.dataset.field);
+        if (!name) return;
         const raw = input.value.trim();
-        if (!raw) return;
-        if (raw === "true" || raw === "false") body[name] = raw === "true";
-        else if (/^-?\d+$/.test(raw)) body[name] = Number(raw);
-        else if (/^-?\d+\.\d+$/.test(raw)) body[name] = Number(raw);
-        else body[name] = raw;
-      });
-      // If PARAM fields are empty, fall back to method body_example so the editor
-      // updates when switching verbs / endpoints.
-      if (!Object.keys(body).length) {
-        const example = state.method.body_example;
-        if (example && typeof example === "object" && !Array.isArray(example)) {
-          for (const [key, value] of Object.entries(example)) {
-            if (value === undefined || value === null || value === "") continue;
-            body[key] = value;
-          }
+        const existing = getByPath(root, name);
+        if (!raw && existing === undefined) return;
+        touched = true;
+        if (!raw) {
+          deleteByPath(root, name);
+          return;
         }
+        let value = raw;
+        if (raw === "true" || raw === "false") value = raw === "true";
+        else if (/^-?\d+$/.test(raw)) value = Number(raw);
+        else if (/^-?\d+\.\d+$/.test(raw)) value = Number(raw);
+        setByPath(root, name, value);
+      });
+      // Empty PARAM inputs → keep full body_example; edits merge into nested paths.
+      if (!touched && example && typeof example === "object" && !Array.isArray(example)) {
+        els.body.value = Object.keys(example).length ? JSON.stringify(example, null, 2) : "";
+        updateBodyHighlight();
+        if (syncVisibility) updateBodyPaneVisibility(state.method);
+        return;
       }
-      // Keep empty object out of the editor — do not show `{}`.
+      const body = wrapKey ? { [wrapKey]: root } : root;
       els.body.value = Object.keys(body).length ? JSON.stringify(body, null, 2) : "";
       updateBodyHighlight();
       if (syncVisibility) {
@@ -6547,7 +6821,10 @@
       const bodyFields = [...(d.body_fields || []), ...(d.indexed_fields || [])];
       state.bodyValues = {};
       for (const f of bodyFields) {
-        state.bodyValues[f.name] = resolveParamValue(f.name, storedParams?.bodyValues, f.example);
+        // Seed required fields from the contract/example; leave optional empty
+        // (placeholder shows the typetext-shaped example until the user fills it).
+        const fallback = f.optional ? "" : formatParamExample(f.example);
+        state.bodyValues[f.name] = resolveParamValue(f.name, storedParams?.bodyValues, fallback);
       }
       els.bodyFieldsWrap.hidden = !bodyFields.length;
       renderParamRows(els.bodyFields, bodyFields, "body");
