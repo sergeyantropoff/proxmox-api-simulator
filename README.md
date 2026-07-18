@@ -2,10 +2,6 @@
 
 # proxmox-api-simulator
 
-[![CI](https://github.com/sergeyantropoff/proxmox-api-simulator/actions/workflows/ci.yml/badge.svg)](https://github.com/sergeyantropoff/proxmox-api-simulator/actions/workflows/ci.yml)
-[![Docker Image](https://img.shields.io/docker/v/inecs/proxmox-api-simulator?label=docker%20hub&sort=semver)](https://hub.docker.com/r/inecs/proxmox-api-simulator)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-
 Stateful asynchronous [Proxmox VE](https://www.proxmox.com/) API simulator for
 testing API clients and infrastructure tooling without a real hypervisor
 cluster.
@@ -110,12 +106,11 @@ curl -sS -X POST -d 'username=root@pam&password=secret' \
 ### Web UI
 
 Interactive console with light/dark themes, endpoint catalog for PVE 6–9,
-runtime contract hot-swap, and a UPID task monitor. More detail:
-[Web UI](docs/web-ui.md).
+runtime contract hot-swap, and a UPID task monitor.
 
 ![Web UI main](docs/images/web-ui-main.png)
 
-![Web UI API catalog](docs/images/web-ui-api-catalog.png)
+More screens and details: [Web UI](docs/web-ui.md).
 
 ## Documentation
 
@@ -207,3 +202,7 @@ make release-up && make release-seed  # run the published stack locally
 - Not a drop-in multi-tenant production Proxmox replacement.
 - Remote IdP / LDAP / live Ceph / live ACME directories are simulated locally;
   they do not call real external systems.
+
+## See also
+
+- [Web UI](docs/web-ui.md) — interactive console, catalogs, DATA panel, and screenshots

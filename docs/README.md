@@ -5,6 +5,8 @@
 Guides for the Proxmox VE API simulator. Switch language with the header on each
 page. Russian mirrors live under [`ru/`](ru/README.md).
 
+![Web UI main](images/web-ui-main.png)
+
 | Guide | Description |
 |---|---|
 | [Getting started](getting-started.md) | First successful lab session |
@@ -28,3 +30,7 @@ page. Russian mirrors live under [`ru/`](ru/README.md).
 
 Runnable cookbooks: [`examples/`](../examples/README.md).
 Integration suites: [`pulumi-tests/`](../pulumi-tests/README.md).
+
+## See also
+
+- [Web UI](web-ui.md) — interactive console, catalogs, DATA panel, and screenshots
