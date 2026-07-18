@@ -1,12 +1,18 @@
 # Example: public Ingress + Let's Encrypt (cert-manager) + Hub image.
 #
+# WARNING: Laboratory / demo template. Always override weak secrets:
+#   --set secret.ticketSigningKey="$(openssl rand -hex 32)"
+#   --set postgresql.auth.password="$(openssl rand -hex 16)"
+# Do not expose a public Ingress with the placeholder values below.
+#
 #   helm upgrade --install pve-sim ./helm/proxmox-api-simulator \
 #     -n proxmox-sim --create-namespace \
 #     -f helm/proxmox-api-simulator/values-ingress-example.yaml \
 #     --set certManager.email=you@example.com \
 #     --set ingress.hosts[0].host=pve-sim.example.com \
 #     --set ingress.tls[0].hosts[0]=pve-sim.example.com \
-#     --set secret.ticketSigningKey="$(openssl rand -hex 32)"
+#     --set secret.ticketSigningKey="$(openssl rand -hex 32)" \
+#     --set postgresql.auth.password="$(openssl rand -hex 16)"
 
 image:
   repository: inecs/proxmox-api-simulator

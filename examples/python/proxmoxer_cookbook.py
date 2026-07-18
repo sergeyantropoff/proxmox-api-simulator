@@ -27,7 +27,7 @@ def wait_task(proxmox: ProxmoxAPI, node: str, upid: str, timeout: float = 120.0)
 
 def main() -> int:
     host = os.environ.get("PVE_HOST", "localhost")
-    port = int(os.environ.get("PVE_PORT", "8007"))
+    port = int(os.environ.get("PVE_PORT", "8006"))
     user = os.environ.get("PVE_USER", "root@pam")
     node = os.environ.get("PVE_NODE", "pve01")
     vmid = int(os.environ.get("PVE_VMID", "110"))

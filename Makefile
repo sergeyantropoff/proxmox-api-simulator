@@ -13,7 +13,7 @@ PUSH_LATEST ?= 1
 COMPOSE_RELEASE ?= $(COMPOSE) -f docker-compose.release.yml
 HELM_CHART ?= ./helm/proxmox-api-simulator
 
-.PHONY: help install format lint typecheck test test-unit test-integration test-contract test-compatibility test-surface evidence coverage run dev up down restart logs docker-build docker-up docker-down docker-logs docker-restart db-up db-down db-migrate db-reset api-import api-diff seed clean ci ci-all shell release release-build release-up release-down release-seed helm-deps helm-template
+.PHONY: help install format lint typecheck test test-unit test-integration test-contract test-compatibility test-surface evidence coverage run dev up down restart logs docker-build docker-up docker-down docker-logs docker-restart db-up db-down db-migrate db-reset api-import api-diff seed clean ci ci-all shell release release-build release-up release-down release-seed helm-deps helm-template helm-lint pulumi-tests
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -45,11 +45,16 @@ test-integration: ## Run tests that require PostgreSQL
 test-contract: ## Run offline API contract tests
 	$(COMPOSE) run --rm --no-deps $(SERVICE_DEV) pytest -m contract
 
-test-compatibility: ## Run proxmoxer smoke flow against the Compose stack
+test-compatibility: ## Run proxmoxer smoke flow (needs --profile tls; proxmoxer is HTTPS-only)
 	@test -f .env || cp .env.example .env
-	$(COMPOSE) up -d --build --wait
-	$(COMPOSE) run --rm --entrypoint python $(SERVICE_SIM) -m app.simulation.seed_cli
-	$(COMPOSE) run --rm $(SERVICE_DEV) pytest -m compatibility
+	$(COMPOSE) --profile tls up -d --build --wait
+	# Medium profile provides pve1/pve2/pve3 required by the proxmoxer migration smoke.
+	$(COMPOSE) run --rm -e SEED_PROFILE=medium --entrypoint python $(SERVICE_SIM) \
+		-m app.simulation.seed_cli
+	$(COMPOSE) run --rm \
+		-e PROXMOXER_HOST=tls-gateway \
+		-e PROXMOXER_PORT=8443 \
+		$(SERVICE_DEV) pytest -m compatibility
 
 test-surface: ## Probe every declared method on majors 6-9 (0x501 / 0xexception)
 	@test -f .env || cp .env.example .env
@@ -66,7 +71,7 @@ run: ## Run the application in the foreground
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) up --build
 
-up: ## Start PostgreSQL, simulator, and TLS gateway
+up: ## Start PostgreSQL and simulator (plain HTTP :8006)
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) up -d --build --wait
 
@@ -90,8 +95,8 @@ docker-build: ## Build runtime and development images
 
 docker-up: up ## Alias for up
 
-docker-restart: ## Rebuild and recreate simulator and TLS gateway only
-	$(COMPOSE) up -d --build --force-recreate simulator tls-gateway
+docker-restart: ## Rebuild and recreate the simulator
+	$(COMPOSE) up -d --build --force-recreate simulator
 
 docker-down: down ## Alias for down
 
@@ -176,8 +181,18 @@ release-seed: ## Seed the published Hub stack (PROFILE=small by default)
 helm-deps: ## No-op placeholder (chart has no OCI dependencies)
 	@echo "Chart $(HELM_CHART) vendors PostgreSQL templates; no helm dependency update required."
 
+helm-lint: ## Lint the Helm chart (requires helm)
+	helm lint $(HELM_CHART)
+	helm lint $(HELM_CHART) -f $(HELM_CHART)/values-ingress-example.yaml \
+		--set certManager.email=docs@example.com \
+		--set secret.ticketSigningKey=docs-only-signing-key
+
 helm-template: ## Render Helm manifests locally (requires helm)
 	helm template pve-sim $(HELM_CHART) \
 		-f $(HELM_CHART)/values-ingress-example.yaml \
 		--set certManager.email=docs@example.com \
 		--set secret.ticketSigningKey=docs-only-signing-key
+
+pulumi-tests: ## Full Pulumi suite (surface majors 6–9 + lifecycle, HTML report)
+	$(MAKE) -C pulumi-tests up
+	$(MAKE) -C pulumi-tests test

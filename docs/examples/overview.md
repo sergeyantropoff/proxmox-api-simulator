@@ -1,3 +1,5 @@
+**Language / Язык:** [English](overview.md) | [Русский](../ru/examples/overview.md)
+
 # Client examples overview
 
 ## Bring-up checklist
@@ -20,7 +22,7 @@ curl -s -X POST 'http://localhost:8006/ui/api/contract/apply?major=8'
 | URL | When |
 |---|---|
 | `http://localhost:8006` | curl, Go, Java, Perl, Ansible, requests |
-| `https://localhost:8007` | proxmoxer, many Terraform/Pulumi TLS clients |
+| `http://localhost:8006` | proxmoxer, many Terraform/Pulumi TLS clients |
 
 ## Auth quick reference
 

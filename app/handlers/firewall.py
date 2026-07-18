@@ -13,20 +13,6 @@ from app.api.registry import HandlerRegistry
 from app.handlers.common import database, require_node, state, subdirs, values
 from app.simulation.seed import CLUSTER_ID
 
-DEFAULT_OPTIONS = {
-    "enable": 1,
-    "policy_in": "DROP",
-    "policy_out": "ACCEPT",
-    "log_level_in": "nolog",
-    "log_level_out": "nolog",
-}
-
-DEFAULT_MACROS = [
-    {"macro": "SSH", "descr": "Secure Shell"},
-    {"macro": "HTTPS", "descr": "Secure web server"},
-    {"macro": "HTTP", "descr": "Web server"},
-]
-
 ScopeFn = Callable[[dict[str, Any]], str]
 
 
@@ -50,25 +36,47 @@ async def _save_firewall(request: Request, firewall: dict[str, Any]) -> None:
     )
 
 
-def _scope_data(firewall: dict[str, Any], scope: str) -> dict[str, Any]:
+def _empty_scope() -> dict[str, Any]:
+    return {
+        "options": {},
+        "rules": [],
+        "aliases": {},
+        "ipset": {},
+        "groups": {},
+        "log": [],
+    }
+
+
+def _get_scope(firewall: dict[str, Any], scope: str) -> dict[str, Any] | None:
+    scopes = firewall.get("scopes")
+    if not isinstance(scopes, dict):
+        return None
+    section = scopes.get(scope)
+    return cast(dict[str, Any], section) if isinstance(section, dict) else None
+
+
+def _ensure_scope(firewall: dict[str, Any], scope: str) -> dict[str, Any]:
+    """Create an empty durable scope on mutation; never injects catalog defaults."""
     scopes = firewall.setdefault("scopes", {})
-    if scope not in scopes or not isinstance(scopes[scope], dict):
-        scopes[scope] = {
-            "options": dict(DEFAULT_OPTIONS),
-            "rules": [],
-            "aliases": {},
-            "ipset": {},
-            "groups": {},
-            "log": [],
-        }
-    section = scopes[scope]
-    section.setdefault("options", dict(DEFAULT_OPTIONS))
+    if not isinstance(scopes, dict):
+        scopes = {}
+        firewall["scopes"] = scopes
+    section = scopes.get(scope)
+    if not isinstance(section, dict):
+        section = _empty_scope()
+        scopes[scope] = section
+    section.setdefault("options", {})
     section.setdefault("rules", [])
     section.setdefault("aliases", {})
     section.setdefault("ipset", {})
     section.setdefault("groups", {})
     section.setdefault("log", [])
     return cast(dict[str, Any], section)
+
+
+def _scope_data(firewall: dict[str, Any], scope: str) -> dict[str, Any]:
+    """Mutation helper — ensure scope exists without template defaults."""
+    return _ensure_scope(firewall, scope)
 
 
 def register_firewall_handlers(registry: HandlerRegistry) -> None:
@@ -98,13 +106,17 @@ def register_firewall_handlers(registry: HandlerRegistry) -> None:
         async def options_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
             payload = await _ready(request, inputs)
             firewall = await _load_firewall(request)
-            return dict(_scope_data(firewall, scope_fn(payload)).get("options", DEFAULT_OPTIONS))
+            section = _get_scope(firewall, scope_fn(payload))
+            if section is None:
+                return {}
+            options = section.get("options", {})
+            return dict(options) if isinstance(options, dict) else {}
 
         async def options_put(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
             payload = await _ready(request, inputs)
             firewall = await _load_firewall(request)
-            section = _scope_data(firewall, scope_fn(payload))
-            current = dict(section.get("options", DEFAULT_OPTIONS))
+            section = _ensure_scope(firewall, scope_fn(payload))
+            current = dict(section.get("options") or {})
             for key, value in payload.items():
                 if key in {"node", "vmid", "delete", "digest"}:
                     continue
@@ -116,7 +128,10 @@ def register_firewall_handlers(registry: HandlerRegistry) -> None:
         async def rules_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
             payload = await _ready(request, inputs)
             firewall = await _load_firewall(request)
-            rules = _scope_data(firewall, scope_fn(payload)).get("rules", [])
+            section = _get_scope(firewall, scope_fn(payload))
+            if section is None:
+                return []
+            rules = section.get("rules", [])
             return list(rules) if isinstance(rules, list) else []
 
         async def rules_create(request: Request, inputs: dict[str, Any]) -> None:
@@ -169,7 +184,8 @@ def register_firewall_handlers(registry: HandlerRegistry) -> None:
         async def aliases_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
             payload = await _ready(request, inputs)
             firewall = await _load_firewall(request)
-            aliases = _scope_data(firewall, scope_fn(payload)).get("aliases", {})
+            section = _get_scope(firewall, scope_fn(payload))
+            aliases = section.get("aliases", {}) if section else {}
             if not isinstance(aliases, dict):
                 return []
             return [
@@ -236,7 +252,8 @@ def register_firewall_handlers(registry: HandlerRegistry) -> None:
         async def ipset_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
             payload = await _ready(request, inputs)
             firewall = await _load_firewall(request)
-            ipsets = _scope_data(firewall, scope_fn(payload)).get("ipset", {})
+            section = _get_scope(firewall, scope_fn(payload))
+            ipsets = section.get("ipset", {}) if section else {}
             if not isinstance(ipsets, dict):
                 return []
             return [
@@ -352,27 +369,43 @@ def register_firewall_handlers(registry: HandlerRegistry) -> None:
         async def refs_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
             payload = await _ready(request, inputs)
             firewall = await _load_firewall(request)
-            section = _scope_data(firewall, scope_fn(payload))
+            section = _get_scope(firewall, scope_fn(payload))
+            if section is None:
+                return []
             refs: list[dict[str, Any]] = []
-            for name in section.get("aliases", {}):
+            for name in section.get("aliases", {}) or {}:
                 refs.append({"type": "alias", "name": name})
-            for name in section.get("ipset", {}):
+            for name in section.get("ipset", {}) or {}:
                 refs.append({"type": "ipset", "name": name})
             return refs
 
         async def log_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
             payload = await _ready(request, inputs)
             firewall = await _load_firewall(request)
-            log = _scope_data(firewall, scope_fn(payload)).get("log", [])
+            section = _get_scope(firewall, scope_fn(payload))
+            if section is None:
+                return []
+            log = section.get("log", [])
             return list(log) if isinstance(log, list) else []
 
-        async def macros_list(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-            return list(DEFAULT_MACROS)
+        async def macros_list(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
+            from app.handlers.common import cluster_metadata
+
+            metadata = await cluster_metadata(request)
+            macros = metadata.get("firewall_macros")
+            if isinstance(macros, list):
+                return [dict(item) for item in macros if isinstance(item, dict)]
+            firewall = await _load_firewall(request)
+            nested = firewall.get("macros")
+            if isinstance(nested, list):
+                return [dict(item) for item in nested if isinstance(item, dict)]
+            return []
 
         async def groups_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
             payload = await _ready(request, inputs)
             firewall = await _load_firewall(request)
-            groups = _scope_data(firewall, scope_fn(payload)).get("groups", {})
+            section = _get_scope(firewall, scope_fn(payload))
+            groups = section.get("groups", {}) if section else {}
             if not isinstance(groups, dict):
                 return []
             return [

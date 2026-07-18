@@ -18,7 +18,7 @@ public final class Cookbook {
   private static final HttpClient CLIENT = HttpClient.newHttpClient();
 
   public static void main(String[] args) throws Exception {
-    String base = env("PVE_BASE", "http://localhost:8006/api2/json");
+    String base = env("PVE_BASE", "https://localhost:8006/api2/json");
     String node = env("PVE_NODE", "pve01");
     String vmid = env("PVE_VMID", "114");
     String token = env("PVE_API_TOKEN", "root@pam!automation=automation-secret");

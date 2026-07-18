@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import secrets
 import time
 from typing import Any
@@ -22,56 +21,20 @@ from app.handlers.common import (
 from app.tasks.repository import TaskRepository
 from app.tasks.upid import Upid
 
-DEFAULT_CEPH_FLAGS: dict[str, int] = {
-    "nobackfill": 0,
-    "nodeep-scrub": 0,
-    "nodown": 0,
-    "noin": 0,
-    "noout": 0,
-    "norebalance": 0,
-    "norecover": 0,
-    "noscrub": 0,
-    "notieragent": 0,
-    "pause": 0,
-}
-
-DEFAULT_CPU_FLAGS: list[dict[str, Any]] = [
-    {"name": "aes", "introduces": "Westmere"},
-    {"name": "avx", "introduces": "SandyBridge"},
-    {"name": "avx2", "introduces": "Haswell"},
-]
-
 
 def _jobs(metadata: dict[str, Any]) -> dict[str, Any]:
-    jobs = metadata.setdefault("jobs", {})
-    if not isinstance(jobs, dict):
-        jobs = {}
-        metadata["jobs"] = jobs
-    sync = jobs.setdefault("realm_sync", {})
-    if not isinstance(sync, dict):
-        sync = {}
-        jobs["realm_sync"] = sync
-    return jobs
+    jobs = metadata.get("jobs")
+    return jobs if isinstance(jobs, dict) else {}
 
 
 def _metrics(metadata: dict[str, Any]) -> dict[str, Any]:
-    metrics = metadata.setdefault("metrics", {})
-    if not isinstance(metrics, dict):
-        metrics = {}
-        metadata["metrics"] = metrics
-    servers = metrics.setdefault("servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
-        metrics["servers"] = servers
-    return metrics
+    metrics = metadata.get("metrics")
+    return metrics if isinstance(metrics, dict) else {}
 
 
 def _cpu_models(metadata: dict[str, Any]) -> dict[str, Any]:
     models = metadata.get("qemu_cpu_models")
-    if not isinstance(models, dict):
-        models = {}
-        metadata["qemu_cpu_models"] = models
-    return models
+    return models if isinstance(models, dict) else {}
 
 
 def _ha_rules_store(metadata: dict[str, Any]) -> list[dict[str, Any]]:
@@ -84,12 +47,7 @@ def _ha_rules_store(metadata: dict[str, Any]) -> list[dict[str, Any]]:
         ]
     if isinstance(rules, list):
         return [dict(item) for item in rules if isinstance(item, dict)]
-    defaults = [
-        {"rule": "node-fencing", "type": "node", "action": "restart"},
-        {"rule": "service-ha", "type": "resource", "action": "failover"},
-    ]
-    metadata["ha_rules"] = defaults
-    return list(defaults)
+    return []
 
 
 def _save_ha_rules(metadata: dict[str, Any], rules: list[dict[str, Any]]) -> None:
@@ -105,18 +63,7 @@ def _replication_jobs(metadata: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _ceph(metadata: dict[str, Any]) -> dict[str, Any]:
     ceph = metadata.get("ceph")
-    if not isinstance(ceph, dict):
-        ceph = {}
-    flags = ceph.get("flags")
-    if not isinstance(flags, dict):
-        flags = copy.deepcopy(DEFAULT_CEPH_FLAGS)
-    else:
-        merged = copy.deepcopy(DEFAULT_CEPH_FLAGS)
-        merged.update({str(key): int(value) for key, value in flags.items()})
-        flags = merged
-    ceph["flags"] = flags
-    metadata["ceph"] = ceph
-    return ceph
+    return ceph if isinstance(ceph, dict) else {}
 
 
 async def _cluster_task(request: Request, *, task_type: str, worker: str) -> str:
@@ -174,8 +121,8 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         job_id = str(payload["id"])
         metadata = await cluster_metadata(request)
-        jobs = _jobs(metadata)
-        sync = jobs.setdefault("realm_sync", {})
+        jobs = dict(_jobs(metadata))
+        sync = dict(jobs.get("realm_sync") or {})
         if job_id in sync:
             raise ApiError(409, "realm-sync job already exists")
         entry = {
@@ -185,6 +132,7 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         entry.setdefault("enabled", 1)
         entry.setdefault("realm", str(payload.get("realm") or "pam"))
         sync[job_id] = entry
+        jobs["realm_sync"] = sync
         metadata["jobs"] = jobs
         await save_cluster_metadata(request, metadata)
         return {"id": job_id, **entry}
@@ -193,8 +141,8 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         job_id = str(payload["id"])
         metadata = await cluster_metadata(request)
-        jobs = _jobs(metadata)
-        sync = jobs.setdefault("realm_sync", {})
+        jobs = dict(_jobs(metadata))
+        sync = dict(jobs.get("realm_sync") or {})
         if job_id not in sync:
             raise ApiError(404, "realm-sync job does not exist")
         updated = {
@@ -206,6 +154,7 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
             },
         }
         sync[job_id] = updated
+        jobs["realm_sync"] = sync
         metadata["jobs"] = jobs
         await save_cluster_metadata(request, metadata)
         return {"id": job_id, **updated}
@@ -213,23 +162,26 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
     async def realm_sync_delete(request: Request, inputs: dict[str, Any]) -> None:
         job_id = str(values(inputs)["id"])
         metadata = await cluster_metadata(request)
-        jobs = _jobs(metadata)
-        sync = jobs.setdefault("realm_sync", {})
+        jobs = dict(_jobs(metadata))
+        sync = dict(jobs.get("realm_sync") or {})
         if job_id not in sync:
             raise ApiError(404, "realm-sync job does not exist")
         del sync[job_id]
+        jobs["realm_sync"] = sync
         metadata["jobs"] = jobs
         await save_cluster_metadata(request, metadata)
 
     async def schedule_analyze(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         schedule = str(values(inputs).get("schedule") or "*/15")
         metadata = await cluster_metadata(request)
-        jobs = _jobs(metadata)
+        jobs = dict(_jobs(metadata))
+        results = jobs.get("schedule_analyze_results")
+        if not isinstance(results, list):
+            results = []
         jobs["last_schedule_analyze"] = {"schedule": schedule, "at": int(time.time())}
         metadata["jobs"] = jobs
         await save_cluster_metadata(request, metadata)
-        now = int(time.time())
-        return [{"timestamp": now + offset * 900, "utc": True} for offset in range(4)]
+        return [dict(item) for item in results if isinstance(item, dict)]
 
     async def metrics_index(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, str]]:
         return subdirs("export", "server")
@@ -238,8 +190,7 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         metadata = await cluster_metadata(request)
         metrics = _metrics(metadata)
         return {
-            "data": metrics.get("export_data")
-            or '# HELP pve_up Node is up\npve_up{node="pve01"} 1\n',
+            "data": str(metrics.get("export_data") or ""),
             "timestamp": int(time.time()),
         }
 
@@ -248,9 +199,12 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
     ) -> list[dict[str, Any]]:
         metadata = await cluster_metadata(request)
         metrics = _metrics(metadata)
+        servers = metrics.get("servers")
+        if not isinstance(servers, dict):
+            return []
         return [
             {"id": server_id, **dict(payload)}
-            for server_id, payload in sorted(metrics.get("servers", {}).items())
+            for server_id, payload in sorted(servers.items())
             if isinstance(payload, dict)
         ]
 
@@ -267,8 +221,8 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         server_id = str(payload["id"])
         metadata = await cluster_metadata(request)
-        metrics = _metrics(metadata)
-        servers = metrics.setdefault("servers", {})
+        metrics = dict(_metrics(metadata))
+        servers = dict(metrics.get("servers") or {})
         if server_id in servers:
             raise ApiError(409, "metrics server already exists")
         entry = {
@@ -279,6 +233,7 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         entry.setdefault("port", 8086)
         entry.setdefault("enable", 1)
         servers[server_id] = entry
+        metrics["servers"] = servers
         metadata["metrics"] = metrics
         await save_cluster_metadata(request, metadata)
         return {"id": server_id, **entry}
@@ -287,8 +242,8 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         server_id = str(payload["id"])
         metadata = await cluster_metadata(request)
-        metrics = _metrics(metadata)
-        servers = metrics.setdefault("servers", {})
+        metrics = dict(_metrics(metadata))
+        servers = dict(metrics.get("servers") or {})
         if server_id not in servers:
             raise ApiError(404, "metrics server does not exist")
         updated = {
@@ -300,6 +255,7 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
             },
         }
         servers[server_id] = updated
+        metrics["servers"] = servers
         metadata["metrics"] = metrics
         await save_cluster_metadata(request, metadata)
         return {"id": server_id, **updated}
@@ -307,19 +263,24 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
     async def metrics_server_delete(request: Request, inputs: dict[str, Any]) -> None:
         server_id = str(values(inputs)["id"])
         metadata = await cluster_metadata(request)
-        metrics = _metrics(metadata)
-        servers = metrics.setdefault("servers", {})
+        metrics = dict(_metrics(metadata))
+        servers = dict(metrics.get("servers") or {})
         if server_id not in servers:
             raise ApiError(404, "metrics server does not exist")
         del servers[server_id]
+        metrics["servers"] = servers
         metadata["metrics"] = metrics
         await save_cluster_metadata(request, metadata)
 
     async def qemu_index(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, str]]:
         return subdirs("cpu-flags", "custom-cpu-models")
 
-    async def qemu_cpu_flags(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        return list(DEFAULT_CPU_FLAGS)
+    async def qemu_cpu_flags(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        metadata = await cluster_metadata(request)
+        flags = metadata.get("qemu_cpu_flags")
+        if isinstance(flags, list):
+            return [dict(item) for item in flags if isinstance(item, dict)]
+        return []
 
     async def cpu_models_list(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
         metadata = await cluster_metadata(request)
@@ -440,14 +401,16 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
     async def ceph_flags_get(request: Request, _inputs: dict[str, Any]) -> dict[str, int]:
         metadata = await cluster_metadata(request)
         ceph = _ceph(metadata)
-        await save_cluster_metadata(request, metadata)
-        return {str(key): int(value) for key, value in ceph["flags"].items()}
+        flags = ceph.get("flags")
+        if not isinstance(flags, dict):
+            return {}
+        return {str(key): int(value) for key, value in flags.items()}
 
     async def ceph_flags_put(request: Request, inputs: dict[str, Any]) -> dict[str, int]:
         payload = values(inputs)
         metadata = await cluster_metadata(request)
-        ceph = _ceph(metadata)
-        flags = dict(ceph["flags"])
+        ceph = dict(_ceph(metadata))
+        flags = dict(ceph.get("flags") or {})
         for key, value in payload.items():
             if key in {"delete", "digest"}:
                 continue
@@ -461,8 +424,8 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         flag = str(values(inputs)["flag"])
         metadata = await cluster_metadata(request)
         ceph = _ceph(metadata)
-        flags = ceph["flags"]
-        if flag not in flags:
+        flags = ceph.get("flags")
+        if not isinstance(flags, dict) or flag not in flags:
             raise ApiError(404, "ceph flag does not exist")
         return {flag: int(flags[flag])}
 
@@ -470,8 +433,8 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         flag = str(payload["flag"])
         metadata = await cluster_metadata(request)
-        ceph = _ceph(metadata)
-        flags = dict(ceph["flags"])
+        ceph = dict(_ceph(metadata))
+        flags = dict(ceph.get("flags") or {})
         if "value" in payload:
             flags[flag] = int(payload["value"])
         elif flag in payload:
@@ -486,14 +449,15 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
     async def ceph_metadata(request: Request, _inputs: dict[str, Any]) -> dict[str, Any]:
         metadata = await cluster_metadata(request)
         ceph = _ceph(metadata)
-        await save_cluster_metadata(request, metadata)
+        config_raw = ceph.get("config")
+        config: dict[str, Any] = dict(config_raw) if isinstance(config_raw, dict) else {}
+        version = ceph.get("version")
+        flags = ceph.get("flags")
         return {
-            "version": ceph.get("version") or {"str": "18.2.2", "parts": [18, 2, 2]},
-            "fsid": ceph.get("config", {}).get("fsid")
-            if isinstance(ceph.get("config"), dict)
-            else "pve-simulator-fsid",
-            "initialized": int(bool(ceph.get("initialized", True))),
-            "flags": ceph.get("flags", {}),
+            "version": dict(version) if isinstance(version, dict) else {},
+            "fsid": str(config.get("fsid") or ""),
+            "initialized": int(bool(ceph.get("initialized"))),
+            "flags": dict(flags) if isinstance(flags, dict) else {},
         }
 
     async def ha_rule_create(request: Request, inputs: dict[str, Any]) -> None:
@@ -588,7 +552,7 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         log = job.get("log")
         if isinstance(log, list):
             return [dict(item) for item in log if isinstance(item, dict)]
-        return [{"t": int(time.time()), "n": 0, "msg": f"replication idle for {job.get('id')}"}]
+        return []
 
     async def node_replication_status(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         job = await node_replication_get(request, inputs)

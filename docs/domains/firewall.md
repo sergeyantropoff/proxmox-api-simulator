@@ -1,3 +1,5 @@
+**Language / Язык:** [English](firewall.md) | [Русский](../ru/domains/firewall.md)
+
 # Firewall
 
 Cluster, node, and guest firewall configuration — rules, aliases, IP sets,

@@ -9,7 +9,15 @@ from fastapi import Request
 
 from app.api.errors import ApiError
 from app.api.registry import HandlerRegistry
-from app.handlers.common import database, require_node, state, storage_payload, subdirs, values
+from app.handlers.common import (
+    database,
+    require_node,
+    require_value,
+    state,
+    storage_payload,
+    subdirs,
+    values,
+)
 from app.simulation.seed import CLUSTER_ID, stable_id
 
 
@@ -485,18 +493,29 @@ def register_storage_handlers(registry: HandlerRegistry) -> None:
     async def file_restore_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         payload = values(inputs)
         await require_node(request, str(payload["node"]))
-        await _storage_row(request, None, str(payload["storage"]))
+        row = await _storage_row(request, None, str(payload["storage"]))
         filepath = str(payload.get("filepath") or "/")
-        return [{"filepath": filepath.rstrip("/") + "/etc", "type": "d", "text": "etc"}]
+        config = state(row["config"])
+        restore = config.get("file_restore")
+        if not isinstance(restore, dict):
+            return []
+        items = restore.get(filepath) or restore.get(filepath.rstrip("/") or "/")
+        return [dict(item) for item in items] if isinstance(items, list) else []
 
     async def file_restore_download(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         payload = values(inputs)
         await require_node(request, str(payload["node"]))
-        await _storage_row(request, None, str(payload["storage"]))
+        row = await _storage_row(request, None, str(payload["storage"]))
+        config = state(row["config"])
+        downloads = config.get("file_restore_downloads")
+        filepath = str(payload.get("filepath") or "/")
+        if isinstance(downloads, dict) and filepath in downloads:
+            entry = downloads[filepath]
+            return dict(entry) if isinstance(entry, dict) else {"filepath": filepath}
         return {
             "download-url": f"/api2/json/nodes/{payload['node']}/storage/"
             f"{payload['storage']}/file-restore/download",
-            "filepath": payload.get("filepath") or "/",
+            "filepath": filepath,
             "volume": payload.get("volume"),
         }
 
@@ -504,40 +523,51 @@ def register_storage_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         await require_node(request, str(payload["node"]))
         row = await _storage_row(request, None, str(payload["storage"]))
+        config = state(row["config"])
+        identity = config.get("identity")
+        if isinstance(identity, dict):
+            return {
+                "storage": str(row["storage_id"]),
+                "type": str(identity.get("type") or row["storage_type"]),
+                "fingerprint": str(identity.get("fingerprint") or ""),
+            }
         return {
             "storage": str(row["storage_id"]),
             "type": str(row["storage_type"]),
-            "fingerprint": f"sim-{row['storage_id']}",
+            "fingerprint": "",
         }
 
     async def import_metadata(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         payload = values(inputs)
         await require_node(request, str(payload["node"]))
         storage_id = str(payload["storage"])
-        volume = str(payload["volume"])
-        await _storage_row(request, None, storage_id)
-        return {
-            "type": "qemu",
-            "source": volume,
-            "disks": {"scsi0": f"{storage_id}:0/vm-import.raw"},
-            "net0": "virtio,bridge=vmbr0",
-        }
+        volume = str(require_value(payload, "volume"))
+        row = await _storage_row(request, None, storage_id)
+        config = state(row["config"])
+        by_volume = config.get("import_metadata_by_volume")
+        if isinstance(by_volume, dict) and volume in by_volume:
+            meta = by_volume[volume]
+            return dict(meta) if isinstance(meta, dict) else {}
+        meta = config.get("import_metadata")
+        if isinstance(meta, dict):
+            return {"source": volume, **meta}
+        return {}
 
     async def storage_rrd(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         payload = values(inputs)
         await require_node(request, str(payload["node"]))
-        storage_id = str(payload["storage"])
-        await _storage_row(request, None, storage_id)
-        return {"filename": f"pve-storage-{storage_id}.rrd"}
+        row = await _storage_row(request, None, str(payload["storage"]))
+        config = state(row["config"])
+        rrd_state = config.get("rrd")
+        return dict(rrd_state) if isinstance(rrd_state, dict) else {}
 
     async def storage_rrddata(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         payload = values(inputs)
         await require_node(request, str(payload["node"]))
-        await _storage_row(request, None, str(payload["storage"]))
-        return [
-            {"time": 1_700_000_000, "used": 10, "total": 100},
-            {"time": 1_700_000_060, "used": 12, "total": 100},
-        ]
+        row = await _storage_row(request, None, str(payload["storage"]))
+        config = state(row["config"])
+        series = config.get("rrddata")
+        return [dict(item) for item in series] if isinstance(series, list) else []
 
     registry.register("/storage", "GET", storage_ids)
     registry.register("/storage", "POST", storage_create)

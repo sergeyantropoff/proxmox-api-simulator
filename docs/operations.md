@@ -1,3 +1,5 @@
+**Language / Язык:** [English](operations.md) | [Русский](ru/operations.md)
+
 # Operations
 
 ## Day-2 commands
@@ -82,6 +84,14 @@ Published tags:
 - `inecs/proxmox-api-simulator:<version>`
 - `inecs/proxmox-api-simulator:latest` (unless `PUSH_LATEST=0`)
 
+After publishing, paste
+[Docker Hub overview](docker-hub-overview.md) into the Hub repository
+description if it drifted, and keep GitHub “About” wording aligned
+(“stateful Proxmox VE API simulator” — not a thin mock).
+
+CI on GitHub Actions runs `make ci` plus Compose/Helm validation on every push
+and PR to `main` (see `.github/workflows/ci.yml`).
+
 ## Quick start with the published compose file
 
 [`docker-compose.release.yml`](../docker-compose.release.yml) pulls the Hub
@@ -92,7 +102,7 @@ docker compose -f docker-compose.release.yml up -d
 docker compose -f docker-compose.release.yml run --rm --entrypoint python \
   simulator -m app.simulation.seed_cli
 
-curl http://localhost:8006/health/ready
+curl -sS http://localhost:8006/health/ready
 open http://localhost:8006/
 ```
 
@@ -110,12 +120,14 @@ Useful overrides:
 |---|---|---|
 | `DOCKER_IMAGE` | `inecs/proxmox-api-simulator` | Image repository |
 | `IMAGE_TAG` | `latest` | Tag to pull |
-| `SIMULATOR_PORT` | `8006` | Host HTTP port |
+| `SIMULATOR_PORT` | `8006` | Host HTTP port (simulator) |
 | `TICKET_SIGNING_KEY` | lab default | Change outside toy labs |
 | `POSTGRES_PASSWORD` | `proxmox` | DB password |
 
-This stack is HTTP-only. The development Compose file still provides the local
-HTTPS gateway on `:8007` for TLS-assuming clients.
+Both development and release Compose publish **HTTP `:8006`** on the host
+(same port as real PVE, which uses HTTPS). Optional HTTPS for proxmoxer-style
+clients: `docker compose --profile tls` on host `:8443`. See
+[Ports and TLS](configuration.md#ports-and-tls).
 
 For Kubernetes with public TLS (cert-manager / Let's Encrypt), use the Helm
 chart — see [Kubernetes / Helm](kubernetes.md).
@@ -126,7 +138,8 @@ chart — see [Kubernetes / Helm](kubernetes.md).
 2. Run migrations.
 3. Confirm `/health/ready`.
 4. Re-check `/admin/compatibility` and `/api2/json/version`.
-5. Re-run `make test-compatibility` if you validate external clients in CI.
+5. Re-run `make test-compatibility` if you validate external clients in CI
+   (seeds the **medium** profile — `pve1`/`pve2`/`pve3` — for migration smoke).
 
 ## Resetting a lab
 

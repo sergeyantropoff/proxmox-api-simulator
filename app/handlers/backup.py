@@ -154,26 +154,31 @@ def register_backup_handlers(registry: HandlerRegistry) -> None:
         vmid = row["vmid"]
         return [f"qemu/{vmid}"] if vmid is not None else [str(row["volume_id"])]
 
-    async def vzdump_defaults(_request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
-        await require_node(_request, str(values(inputs)["node"]))
-        return {
-            "all": 0,
-            "bwlimit": 0,
-            "compress": "zstd",
-            "dumpdir": "backup",
-            "mode": "snapshot",
-            "remove": 0,
-            "storage": "nfs-backup",
-            "mailto": "",
-            "notes-template": "{{guestname}}",
-        }
+    async def vzdump_defaults(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        from app.handlers.nodes import load_node_ops
+
+        node = str(values(inputs)["node"])
+        await require_node(request, node)
+        ops = await load_node_ops(request, node)
+        vzdump = ops.get("vzdump")
+        defaults = vzdump.get("defaults") if isinstance(vzdump, dict) else None
+        return dict(defaults) if isinstance(defaults, dict) else {}
 
     async def vzdump_extractconfig(request: Request, inputs: dict[str, Any]) -> str:
+        from app.handlers.nodes import load_node_ops
+
         payload = values(inputs)
+        node = str(payload["node"])
         volid = str(payload.get("volume") or payload.get("volid") or "")
         if not volid:
             raise ApiError(400, "volume parameter required")
-        return f"# simulated vzdump config extracted from {volid}\name: demo\nmemory: 2048\n"
+        await require_node(request, node)
+        ops = await load_node_ops(request, node)
+        vzdump = ops.get("vzdump")
+        configs = vzdump.get("extractconfig") if isinstance(vzdump, dict) else None
+        if not isinstance(configs, dict):
+            return ""
+        return str(configs.get(volid) or "")
 
     async def vzdump_create(request: Request, inputs: dict[str, Any]) -> str:
         payload = values(inputs)

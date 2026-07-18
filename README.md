@@ -1,8 +1,19 @@
+**Language / Язык:** [English](README.md) | [Русский](README.ru.md)
+
 # proxmox-api-simulator
+
+[![CI](https://github.com/sergeyantropoff/proxmox-api-simulator/actions/workflows/ci.yml/badge.svg)](https://github.com/sergeyantropoff/proxmox-api-simulator/actions/workflows/ci.yml)
+[![Docker Image](https://img.shields.io/docker/v/inecs/proxmox-api-simulator?label=docker%20hub&sort=semver)](https://hub.docker.com/r/inecs/proxmox-api-simulator)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Stateful asynchronous [Proxmox VE](https://www.proxmox.com/) API simulator for
 testing API clients and infrastructure tooling without a real hypervisor
 cluster.
+
+> **Laboratory / CI only.** Default credentials, signing keys, and open UI/admin
+> helpers are intentional lab defaults. Do **not** expose this stack to the
+> public Internet without replacing secrets and adding your own controls.
+> See [SECURITY.md](SECURITY.md) and [Security](docs/security.md).
 
 The simulator is backed by PostgreSQL, driven by imported official API
 contracts, and exposes the same `/api2/json` and `/api2/extjs` surfaces as
@@ -37,13 +48,16 @@ Image: [`inecs/proxmox-api-simulator`](https://hub.docker.com/r/inecs/proxmox-ap
 
 ### Docker Compose
 
+Needs a checkout that includes `docker-compose.release.yml`. Do not publish host
+`:8006` beyond a trusted lab without rotating `TICKET_SIGNING_KEY` / DB password.
+
 ```bash
 docker compose -f docker-compose.release.yml up -d
 docker compose -f docker-compose.release.yml run --rm --entrypoint python \
   simulator -m app.simulation.seed_cli
 
-curl http://localhost:8006/health/ready
-curl http://localhost:8006/api2/json/version
+curl -sS http://localhost:8006/health/ready
+curl -sS http://localhost:8006/api2/json/version
 ```
 
 Or: `make release-up && make release-seed PROFILE=small`
@@ -57,10 +71,14 @@ helm upgrade --install pve-sim ./helm/proxmox-api-simulator \
   --set certManager.email=you@example.com \
   --set ingress.hosts[0].host=pve-sim.example.com \
   --set ingress.tls[0].hosts[0]=pve-sim.example.com \
-  --set secret.ticketSigningKey="$(openssl rand -hex 32)"
+  --set secret.ticketSigningKey="$(openssl rand -hex 32)" \
+  --set postgresql.auth.password="$(openssl rand -hex 16)"
 ```
 
-Requires an Ingress controller and cert-manager. Details:
+Requires an Ingress controller and cert-manager. The chart Service speaks
+**HTTP** `:8006`; TLS terminates at Ingress. Compose also serves plain HTTP on
+`:8006`; optional HTTPS for proxmoxer-style clients is
+`docker compose --profile tls` on host `:8443`. Details:
 [Kubernetes / Helm](docs/kubernetes.md).
 
 - HTTP API and Web UI (Compose): [http://localhost:8006/](http://localhost:8006/)
@@ -76,28 +94,34 @@ make install
 make up
 make seed PROFILE=small
 
-curl http://localhost:8006/health/ready
-curl http://localhost:8006/api2/json/version
-curl -X POST -d 'username=root@pam&password=secret' \
+curl -sS http://localhost:8006/health/ready
+curl -sS http://localhost:8006/api2/json/version
+curl -sS -X POST -d 'username=root@pam&password=secret' \
   http://localhost:8006/api2/json/access/ticket
 ```
 
 - HTTP API and Web UI: [http://localhost:8006/](http://localhost:8006/)
-- HTTPS gateway (self-signed, development only): `https://localhost:8007`
-  — checked-in `docker/tls/server.key` is a **lab-only** localhost cert; do not
-  reuse it outside local Compose.
+  (real PVE uses **HTTPS** on `:8006`; this lab uses plain HTTP on the same
+  port. Optional TLS for proxmoxer: `docker compose --profile tls` →
+  `https://localhost:8443/`)
+- Port map and TLS notes: [Ports and TLS](docs/configuration.md#ports-and-tls).
 - FastAPI schema docs: [http://localhost:8006/docs](http://localhost:8006/docs)
 
 ### Web UI
 
-Interactive console with light/dark themes, endpoint catalog for PVE 6–9, and
-runtime contract hot-swap. More detail: [Web UI](docs/web-ui.md).
+Interactive console with light/dark themes, endpoint catalog for PVE 6–9,
+runtime contract hot-swap, and a UPID task monitor. More detail:
+[Web UI](docs/web-ui.md).
 
 ![Web UI light theme](docs/images/web-ui-light.png)
 
 ![Web UI dark theme](docs/images/web-ui-dark.png)
 
 ## Documentation
+
+Documentation is bilingual. Use the **Language / Язык** switcher at the top of
+each page, or open the Russian root [README.ru.md](README.ru.md). Index:
+[docs/README.md](docs/README.md) · [docs/ru/README.md](docs/ru/README.md).
 
 | Guide | Description |
 |---|---|
@@ -120,6 +144,8 @@ runtime contract hot-swap. More detail: [Web UI](docs/web-ui.md).
 | [Compatibility](docs/compatibility.md) | Evidence model and release matrix |
 
 Runnable cookbooks live under [`examples/`](examples/README.md).
+Pulumi integration suite (contract surface majors 6–9 + lifecycle, HTML report):
+[`pulumi-tests/`](pulumi-tests/README.md) (`make pulumi-tests`).
 
 ## proxmoxer (HTTPS gateway)
 
@@ -128,7 +154,7 @@ from proxmoxer import ProxmoxAPI
 
 proxmox = ProxmoxAPI(
     "localhost",
-    port=8007,
+    port=8006,
     user="root@pam",
     password="secret",
     verify_ssl=False,  # local self-signed development certificate only
@@ -168,6 +194,12 @@ make release VERSION=0.2.0            # override tag
 make release-build                    # build/tag only, no push
 make release-up && make release-seed  # run the published stack locally
 ```
+
+## Contributing / security / changelog
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) · [CONTRIBUTING.ru.md](CONTRIBUTING.ru.md)
+- [SECURITY.md](SECURITY.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## What this is not
 

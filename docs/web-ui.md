@@ -1,3 +1,5 @@
+**Language / Язык:** [English](web-ui.md) | [Русский](ru/web-ui.md)
+
 # Web UI
 
 Open [http://localhost:8006/](http://localhost:8006/) after `make up`.
@@ -28,6 +30,8 @@ Dark theme — same console with theme toggle:
 - **Apply as runtime** hot-swap for the active contract
 - Compatibility and readiness views
 - Demo-cluster load / unload / refresh
+- UPID task monitor (header control → status / log / “From last response”;
+  requires login for authenticated task polls)
 - Link to OpenAPI at `/docs`
 
 ## Backend helpers

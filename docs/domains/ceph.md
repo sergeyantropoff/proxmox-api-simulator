@@ -1,3 +1,5 @@
+**Language / Язык:** [English](ceph.md) | [Русский](../ru/domains/ceph.md)
+
 # Ceph
 
 Ceph-related API paths persist simulated cluster, pool, OSD, and monitor state.

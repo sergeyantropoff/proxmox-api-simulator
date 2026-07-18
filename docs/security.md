@@ -1,4 +1,8 @@
+**Language / Язык:** [English](security.md) | [Русский](ru/security.md)
+
 # Security
+
+Repository policy and reporting: [SECURITY.md](../SECURITY.md).
 
 ## Lab threat model
 
@@ -7,8 +11,10 @@ multi-tenant public Proxmox service. Default credentials, UI demo controls, and
 compatibility endpoints are convenient for development and intentionally open
 in the default Compose stack.
 
-Do not expose ports `8006` / `8007` to untrusted networks without additional
-controls you supply yourself.
+Do not expose port `8006` to untrusted networks without additional controls you
+supply yourself. Host `:8006` is plain HTTP in Compose (real PVE uses HTTPS on
+that port). Host `:8007` is **not** used by this stack (on hardware it is
+typically PBS). See [Ports and TLS](configuration.md#ports-and-tls).
 
 ## Credentials and secrets
 
@@ -23,9 +29,10 @@ tokens before demoing to others.
 
 ## TLS materials
 
-`docker/tls/` contains a checked-in self-signed certificate for the local
-gateway. It exists so unmodified TLS clients (e.g. proxmoxer) can connect.
-**Never** reuse these files in production.
+`docker/tls/` contains a checked-in self-signed certificate for the optional
+Compose TLS gateway (`--profile tls` on `:8443`). It exists so unmodified TLS
+clients (e.g. proxmoxer) can connect when that profile is enabled. **Never**
+reuse these files in production.
 
 ## Simulator administration
 

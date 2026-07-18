@@ -1,3 +1,5 @@
+**Language / Язык:** [English](storage-backup.md) | [Русский](../ru/domains/storage-backup.md)
+
 # Storage & backup
 
 ## Storage

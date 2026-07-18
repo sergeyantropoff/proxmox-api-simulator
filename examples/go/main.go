@@ -19,7 +19,7 @@ func env(k, def string) string {
 }
 
 func main() {
-	base := strings.TrimRight(env("PVE_BASE", "http://localhost:8006/api2/json"), "/")
+	base := strings.TrimRight(env("PVE_BASE", "https://localhost:8006/api2/json"), "/")
 	node := env("PVE_NODE", "pve01")
 	vmid := env("PVE_VMID", "113")
 	token := env("PVE_API_TOKEN", "root@pam!automation=automation-secret")

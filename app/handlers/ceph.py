@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from typing import Any, cast
+from typing import Any
 
 from fastapi import Request
 
@@ -21,37 +21,6 @@ from app.handlers.common import (
 )
 from app.simulation.seed import CLUSTER_ID
 
-DEFAULT_CLUSTER_CEPH = {
-    "initialized": True,
-    "config": {
-        "network": "10.10.10.0/24",
-        "cluster-network": "10.10.10.0/24",
-        "size": 3,
-        "min_size": 2,
-        "pg_bits": 7,
-    },
-    "cfg_db": [
-        {"section": "global", "name": "auth_client_required", "value": "cephx"},
-        {"section": "global", "name": "fsid", "value": "pve-simulator-fsid"},
-    ],
-    "cfg_raw": "[global]\nfsid = pve-simulator-fsid\nauth_client_required = cephx\n",
-    "cfg_values": {},
-    "pools": {
-        "rbd": {
-            "pool": "rbd",
-            "size": 3,
-            "min_size": 2,
-            "pg_num": 128,
-            "application": "rbd",
-            "crush_rule": "replicated_rule",
-        }
-    },
-    "fs": {},
-    "rules": [{"name": "replicated_rule", "id": 0}],
-    "crush": "device 0 osd.0 class hdd\n",
-    "running": True,
-}
-
 
 async def _load_cluster_ceph(request: Request) -> dict[str, Any]:
     row = await database(request).pool.fetchrow(
@@ -60,14 +29,9 @@ async def _load_cluster_ceph(request: Request) -> dict[str, Any]:
     )
     metadata = state(row["metadata"]) if row is not None else {}
     ceph = metadata.get("ceph")
-    if not isinstance(ceph, dict) or not ceph:
-        return dict(DEFAULT_CLUSTER_CEPH)
-    merged = dict(DEFAULT_CLUSTER_CEPH)
-    merged.update(ceph)
-    for key in ("config", "pools", "fs", "cfg_values"):
-        if not isinstance(merged.get(key), dict):
-            merged[key] = dict(cast(dict[str, Any], DEFAULT_CLUSTER_CEPH[key]))
-    return merged
+    if not isinstance(ceph, dict):
+        return {}
+    return dict(ceph)
 
 
 async def _save_cluster_ceph(request: Request, ceph: dict[str, Any]) -> None:
@@ -82,34 +46,27 @@ async def _save_cluster_ceph(request: Request, ceph: dict[str, Any]) -> None:
 
 async def _load_node_ceph(request: Request, node: str) -> dict[str, Any]:
     metadata = await node_metadata(request, node)
-    ops = metadata.setdefault("ops", {})
-    ceph = ops.setdefault(
-        "ceph",
-        {
-            "mds": {},
-            "mgr": {},
-            "mon": {f"{node}": {"name": node, "addr": f"{node}.local:6789", "rank": 0}},
-            "log": [{"t": 1_700_000_000, "n": 0, "line": "ceph simulator ready"}],
-        },
-    )
+    ops = metadata.get("ops")
+    if not isinstance(ops, dict):
+        return {"mds": {}, "mgr": {}, "mon": {}, "log": []}
+    ceph = ops.get("ceph")
     if not isinstance(ceph, dict):
-        ceph = {
-            "mds": {},
-            "mgr": {},
-            "mon": {},
-            "log": [],
-        }
-        ops["ceph"] = ceph
-    ceph.setdefault("mds", {})
-    ceph.setdefault("mgr", {})
-    ceph.setdefault("mon", {})
-    ceph.setdefault("log", [])
-    return ceph
+        return {"mds": {}, "mgr": {}, "mon": {}, "log": []}
+    return {
+        "mds": ceph.get("mds") if isinstance(ceph.get("mds"), dict) else {},
+        "mgr": ceph.get("mgr") if isinstance(ceph.get("mgr"), dict) else {},
+        "mon": ceph.get("mon") if isinstance(ceph.get("mon"), dict) else {},
+        "log": list(ceph.get("log") or []) if isinstance(ceph.get("log"), list) else [],
+        **{key: value for key, value in ceph.items() if key not in {"mds", "mgr", "mon", "log"}},
+    }
 
 
 async def _save_node_ceph(request: Request, node: str, ceph: dict[str, Any]) -> None:
     metadata = await node_metadata(request, node)
-    ops = metadata.setdefault("ops", {})
+    ops = metadata.get("ops")
+    if not isinstance(ops, dict):
+        ops = {}
+        metadata["ops"] = ops
     ops["ceph"] = ceph
     await save_node_metadata(request, node, metadata)
 
@@ -175,10 +132,12 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
         await require_node(request, str(payload["node"]))
         ceph = await _load_cluster_ceph(request)
         keys = [item.strip() for item in str(payload.get("config-keys") or "").split(",") if item]
-        stored = ceph.setdefault("cfg_values", {})
-        result = {key: stored.get(key, "") for key in keys} if keys else dict(stored)
-        await _save_cluster_ceph(request, ceph)
-        return result
+        stored = ceph.get("cfg_values")
+        if not isinstance(stored, dict):
+            stored = {}
+        if keys:
+            return {key: stored.get(key, "") for key in keys}
+        return dict(stored)
 
     async def crush(request: Request, inputs: dict[str, Any]) -> str:
         await require_node(request, str(values(inputs)["node"]))
@@ -202,12 +161,13 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
     async def cmd_safety(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         payload = values(inputs)
         await require_node(request, str(payload["node"]))
-        return {
-            "safe": 1,
-            "action": payload.get("action"),
-            "service": payload.get("service"),
-            "id": payload.get("id"),
-        }
+        ceph = await _load_cluster_ceph(request)
+        safety = ceph.get("cmd_safety")
+        result = dict(safety) if isinstance(safety, dict) else {}
+        for key in ("action", "service", "id"):
+            if key in payload:
+                result[key] = payload[key]
+        return result
 
     async def init(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
@@ -368,13 +328,7 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
         pool = (ceph.get("pools") or {}).get(name)
         if not isinstance(pool, dict):
             raise ApiError(404, "pool does not exist")
-        return {
-            **pool,
-            "pg_num": pool.get("pg_num", 128),
-            "bytes_used": 0,
-            "percent_used": 0.0,
-            "healthy": True,
-        }
+        return dict(pool)
 
     async def fs_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         await require_node(request, str(values(inputs)["node"]))
@@ -682,13 +636,16 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
         await require_node(request, node)
         row = await _osd_row(request, node, osdid)
         current = state(row["state"])
+        metadata = current.get("metadata")
+        if isinstance(metadata, dict):
+            return dict(metadata)
         return {
             "osd": {
                 "id": int(osdid) if osdid.isdigit() else osdid,
-                "uuid": current.get("uuid") or f"osd-uuid-{osdid}",
-                "device_class": current.get("device_class", "hdd"),
+                "uuid": current.get("uuid", ""),
+                "device_class": current.get("device_class", ""),
             },
-            "devices": [{"dev": current.get("dev") or f"/dev/sd{osdid}"}],
+            "devices": [{"dev": current.get("dev", "")}] if current.get("dev") else [],
         }
 
     async def cluster_ceph_status(_request: Request, _inputs: dict[str, Any]) -> dict[str, Any]:
@@ -698,17 +655,35 @@ def register_ceph_handlers(registry: HandlerRegistry) -> None:
         )
         total = int(row["capacity_bytes"] or 0) if row is not None else 0
         used = int(row["used_bytes"] or 0) if row is not None else 0
-        osd_count = await database(_request).pool.fetchval(
-            "SELECT count(*)::int FROM resources WHERE kind='ceph-osd'"
+        osd_rows = await database(_request).pool.fetch(
+            "SELECT state FROM resources WHERE kind='ceph-osd'"
         )
+        num_osds = len(osd_rows)
+        num_up = 0
+        num_in = 0
+        for osd_row in osd_rows:
+            osd_state = state(osd_row["state"])
+            if str(osd_state.get("status") or "") == "up":
+                num_up += 1
+            if osd_state.get("in") in (True, 1, "1"):
+                num_in += 1
         ceph = await _load_cluster_ceph(_request)
+        version = ceph.get("version")
+        version_str = (
+            str(version.get("str"))
+            if isinstance(version, dict) and version.get("str") is not None
+            else str(version or "")
+        )
+        health = ceph.get("health")
+        if not isinstance(health, dict):
+            health = {"status": "HEALTH_OK" if ceph.get("running") else "HEALTH_WARN"}
         return {
-            "version": "17.2.7",
-            "health": {"status": "HEALTH_OK" if ceph.get("running", True) else "HEALTH_WARN"},
+            "version": version_str,
+            "health": health,
             "osdmap": {
-                "num_osds": osd_count,
-                "num_up_osds": osd_count - 1,
-                "num_in_osds": osd_count - 1,
+                "num_osds": num_osds,
+                "num_up_osds": num_up,
+                "num_in_osds": num_in,
             },
             "pgmap": {"bytes_used": used, "bytes_total": total},
             "fsmap": {"filesystems": list((ceph.get("fs") or {}).keys())},

@@ -1,0 +1,11 @@
+.env
+**/reports/*.xml
+**/reports/*.html
+**/reports/*.json
+pulumi/.pulumi-state/
+pulumi/.pulumi-work/
+pulumi/programs/**/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.retry

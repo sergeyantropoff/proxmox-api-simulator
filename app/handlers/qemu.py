@@ -33,6 +33,51 @@ def _state(value: object) -> dict[str, Any]:
     return dict(cast(Mapping[str, Any], value))
 
 
+# Runtime-only keys stored in ``resources.state``; never echo on GET /config.
+_QEMU_CONFIG_INTERNAL = frozenset(
+    {
+        "agent",
+        "cloudinit_dump",
+        "config",
+        "interfaces",
+        "migrate_preconditions",
+        "rrd",
+        "rrddata",
+        "sendkey",
+        "status",
+    }
+)
+
+
+def _agent_config_string(value: object) -> str:
+    """Proxmox QEMU config ``agent`` is a string (e.g. ``1`` / ``0``), not an object."""
+
+    if isinstance(value, dict):
+        return "1" if value.get("enabled", True) else "0"
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if value in (None, ""):
+        return "0"
+    text = str(value).strip()
+    return text or "0"
+
+
+def _public_qemu_config(config: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    """Wire-format QEMU config for clients (bpg / pulumi-proxmoxve)."""
+
+    merged = {**state, **config}
+    payload: dict[str, Any] = {}
+    for key, value in merged.items():
+        if key in _QEMU_CONFIG_INTERNAL:
+            continue
+        if isinstance(value, dict | list):
+            continue
+        payload[key] = value
+    agent = config.get("agent", state.get("agent", "0"))
+    payload["agent"] = _agent_config_string(agent)
+    return payload
+
+
 def register_qemu_handlers(registry: HandlerRegistry) -> None:
     async def qemu_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         node = str(_values(inputs)["node"])
@@ -117,7 +162,10 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
         )
         if row is None:
             raise ApiError(404, "virtual machine does not exist")
-        return {"vmid": int(vmid), **_state(row["config"]), **_state(row["state"])}
+        return {
+            "vmid": int(vmid),
+            **_public_qemu_config(_state(row["config"]), _state(row["state"])),
+        }
 
     async def mutate(operation: str, request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)
@@ -406,7 +454,7 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
 
     async def migrate_preconditions(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         values = _values(inputs)
-        await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
+        resource = await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
         target = values.get("target")
         if target in {None, ""}:
             raise ApiError(400, "parameter 'target' is required")
@@ -416,7 +464,13 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
         )
         if not exists:
             raise ApiError(404, "target node does not exist")
-        return {"local_disks": [], "local_resources": [], "running": False}
+        state = _state(resource["state"])
+        pre = state.get("migrate_preconditions")
+        payload = dict(pre) if isinstance(pre, dict) else {}
+        payload["running"] = str(state.get("status") or "") == "running"
+        payload.setdefault("local_disks", [])
+        payload.setdefault("local_resources", [])
+        return payload
 
     async def migrate(request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)
@@ -544,39 +598,16 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
         command: str, request: Request, inputs: dict[str, Any]
     ) -> dict[str, Any]:
         resource = await _agent_resource(request, _values(inputs))
-        config = _state(resource["config"])
-        vmid = str(_values(inputs)["vmid"])
-        results: dict[str, Any] = {
-            "info": {
-                "version": "9.2.0-simulator",
-                "supported_commands": [
-                    {"name": name, "enabled": True, "success-response": True}
-                    for name in ("guest-ping", "guest-info", "guest-get-osinfo")
-                ],
-            },
-            "get-osinfo": {
-                "name": str(config.get("ostype", "linux")),
-                "pretty-name": "Proxmox Simulator Guest",
-                "version": "1.0",
-                "machine": "x86_64",
-            },
-            "get-host-name": {"host-name": str(config.get("name", f"vm-{vmid}"))},
-            "network-get-interfaces": [
-                {
-                    "name": "eth0",
-                    "hardware-address": "02:00:00:00:00:01",
-                    "ip-addresses": [
-                        {"ip-address": "192.0.2.10", "ip-address-type": "ipv4", "prefix": 24}
-                    ],
-                }
-            ],
-            "ping": {},
-        }
         if command == "get-time":
             seconds = int(
                 await _database(request).pool.fetchval("SELECT extract(epoch from now())::bigint")
             )
             return {"result": {"seconds": seconds, "nanoseconds": 0}}
+        state = _state(resource["state"])
+        agent = state.get("agent")
+        results = agent.get("results") if isinstance(agent, dict) else None
+        if not isinstance(results, dict) or command not in results:
+            raise ApiError(404, f"agent command '{command}' has no stored result")
         return {"result": results[command]}
 
     async def agent_info(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -586,6 +617,12 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
         return await agent_result("get-osinfo", request, inputs)
 
     async def agent_hostname(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        resource = await _agent_resource(request, _values(inputs))
+        state = _state(resource["state"])
+        config = _state(resource["config"])
+        name = state.get("name") or config.get("name")
+        if name:
+            return {"result": {"host-name": str(name)}}
         return await agent_result("get-host-name", request, inputs)
 
     async def agent_network(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -825,7 +862,14 @@ async def _agent_resource(request: Request, values: dict[str, Any]) -> Any:
     resource = await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
     config = _state(resource["config"])
     state = _state(resource["state"])
-    if str(config.get("agent", "0")).split(",", 1)[0].lower() not in {"1", "true", "yes"}:
+    agent = state.get("agent")
+    if not isinstance(agent, dict):
+        agent = config.get("agent")
+    if isinstance(agent, dict):
+        enabled = bool(agent.get("enabled", True))
+    else:
+        enabled = str(config.get("agent", "0")).split(",", 1)[0].lower() in {"1", "true", "yes"}
+    if not enabled:
         raise ApiError(409, "QEMU guest agent is not enabled")
     if state.get("status") != "running":
         raise ApiError(409, "QEMU guest agent is not running")

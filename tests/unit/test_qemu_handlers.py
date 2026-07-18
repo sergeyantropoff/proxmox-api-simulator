@@ -1,5 +1,6 @@
 """Persistent QEMU CRUD semantic handler tests."""
 
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -66,9 +67,20 @@ class QemuPool:
             return {"state": '{"status":"stopped"}', "config": '{"name":"vm"}'}
         if "SELECT r.id, r.state" in sql:
             status = "running" if self.running else "stopped"
+            agent = {
+                "enabled": True,
+                "results": {
+                    "info": {"version": "9.2.0"},
+                    "get-osinfo": {"machine": "x86_64", "name": "l26"},
+                    "get-host-name": {"host-name": "vm"},
+                    "network-get-interfaces": [{"name": "eth0"}],
+                    "get-time": {"seconds": 1_700_000_000},
+                    "ping": {},
+                },
+            }
             return {
                 "id": self.resource_id,
-                "state": f'{{"status":"{status}"}}',
+                "state": json.dumps({"status": status, "name": "vm", "agent": agent}),
                 "config": ('{"agent":1,"name":"vm","scsi0":"local-lvm:vm-150-disk-0,size=8G"}'),
             }
         if "SELECT r.id, r.state, v.config" in sql:

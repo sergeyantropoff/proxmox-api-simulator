@@ -62,10 +62,12 @@ def qemu_handler(repository: TaskRepository, clock: Clock) -> TaskHandler:
 
 
 async def _create(repository: TaskRepository, task: Task) -> dict[str, Any]:
+    from app.simulation.seed import enrich_guest_state
+
     node, vmid = str(task.payload["node"]), int(task.payload["vmid"])
     config = dict(task.payload.get("config", {}))
     resource_id = uuid.uuid4()
-    state = {"status": "stopped", **config}
+    state = enrich_guest_state({"status": "stopped", **config}, kind="qemu", vmid=str(vmid))
     async with repository.pool.acquire() as connection:
         async with connection.transaction():
             node_row = await connection.fetchrow(

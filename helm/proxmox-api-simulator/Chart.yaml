@@ -4,7 +4,7 @@ description: Stateful Proxmox VE API simulator (PostgreSQL-backed) for labs and 
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
-home: https://github.com/inecs/proxmox-api-simulator
+home: https://github.com/sergeyantropoff/proxmox-api-simulator
 keywords:
   - proxmox
   - pve
@@ -12,5 +12,6 @@ keywords:
   - simulator
 maintainers:
   - name: inecs
+    url: https://hub.docker.com/r/inecs/proxmox-api-simulator
 # Bundled PostgreSQL uses the official postgres image (see templates/postgresql-*.yaml).
 # No external chart dependency is required — run helm install directly.

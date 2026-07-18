@@ -21,52 +21,8 @@ _SECRET_KEYS = frozenset({"key", "token", "fingerprint"})
 
 
 def _sdn(metadata: dict[str, Any]) -> dict[str, Any]:
-    current = metadata.setdefault(
-        "sdn",
-        {
-            "zones": {},
-            "vnets": {},
-            "controllers": {},
-            "dns": {},
-            "ipams": {},
-            "fabrics": {},
-            "fabric_nodes": {},
-            "prefix_lists": {},
-            "route_maps": {},
-            "lock": None,
-            "pending": False,
-            "running_version": 1,
-        },
-    )
-    if not isinstance(current, dict):
-        current = {
-            "zones": {},
-            "vnets": {},
-            "controllers": {},
-            "dns": {},
-            "ipams": {},
-            "fabrics": {},
-            "fabric_nodes": {},
-            "prefix_lists": {},
-            "route_maps": {},
-            "lock": None,
-            "pending": False,
-            "running_version": 1,
-        }
-        metadata["sdn"] = current
-    for key in (
-        "zones",
-        "vnets",
-        "controllers",
-        "dns",
-        "ipams",
-        "fabrics",
-        "fabric_nodes",
-        "prefix_lists",
-        "route_maps",
-    ):
-        current.setdefault(key, {})
-    return current
+    current = metadata.get("sdn")
+    return current if isinstance(current, dict) else {}
 
 
 def _public(item: dict[str, Any]) -> dict[str, Any]:
@@ -77,9 +33,14 @@ def _store_list(store: dict[str, Any], *, id_key: str) -> list[dict[str, Any]]:
     return [_public({id_key: name, **item}) for name, item in sorted(store.items())]
 
 
-async def _load(request: Request) -> tuple[dict[str, Any], dict[str, Any]]:
+async def _load(
+    request: Request, *, for_write: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
     metadata = await cluster_metadata(request)
-    return metadata, _sdn(metadata)
+    sdn = _sdn(metadata)
+    if for_write and metadata.get("sdn") is not sdn:
+        metadata["sdn"] = sdn
+    return metadata, sdn
 
 
 def register_sdn_handlers(registry: HandlerRegistry) -> None:
@@ -100,7 +61,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def apply(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         lock = sdn.get("lock")
         token = payload.get("lock-token")
         if lock and token and lock.get("token") != token:
@@ -112,7 +73,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         await save_cluster_metadata(request, metadata)
 
     async def lock_create(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         if sdn.get("lock") and not values(inputs).get("allow-pending"):
             raise ApiError(400, "SDN is already locked")
         token = secrets.token_hex(8)
@@ -122,7 +83,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def lock_delete(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         lock = sdn.get("lock")
         if lock is None:
             return None
@@ -133,14 +94,14 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def rollback(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         sdn["pending"] = False
         if payload.get("release-lock"):
             sdn["lock"] = None
         await save_cluster_metadata(request, metadata)
 
     async def dry_run(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         return [
             {"type": "zone", "name": name, "action": "noop"}
             for name in sorted(sdn.get("zones") or {})
@@ -154,7 +115,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         create_required: str | None = None,
     ) -> None:
         async def list_items(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
-            _metadata, sdn = await _load(request)
+            _metadata, sdn = await _load(request, for_write=True)
             items = _store_list(sdn.get(store_key) or {}, id_key=id_param)
             type_filter = values(inputs).get("type")
             if type_filter:
@@ -164,7 +125,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         async def create(request: Request, inputs: dict[str, Any]) -> None:
             payload = values(inputs)
             item_id = str(payload[create_required or id_param])
-            metadata, sdn = await _load(request)
+            metadata, sdn = await _load(request, for_write=True)
             store = sdn.setdefault(store_key, {})
             if item_id in store:
                 raise ApiError(400, f"{store_key} '{item_id}' already exists")
@@ -179,7 +140,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
         async def get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
             item_id = str(values(inputs)[id_param])
-            _metadata, sdn = await _load(request)
+            _metadata, sdn = await _load(request, for_write=True)
             item = (sdn.get(store_key) or {}).get(item_id)
             if not isinstance(item, dict):
                 raise ApiError(404, f"{store_key} entry does not exist")
@@ -188,7 +149,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         async def update(request: Request, inputs: dict[str, Any]) -> None:
             payload = values(inputs)
             item_id = str(payload[id_param])
-            metadata, sdn = await _load(request)
+            metadata, sdn = await _load(request, for_write=True)
             store = sdn.setdefault(store_key, {})
             if item_id not in store:
                 raise ApiError(404, f"{store_key} entry does not exist")
@@ -208,7 +169,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
         async def delete(request: Request, inputs: dict[str, Any]) -> None:
             item_id = str(values(inputs)[id_param])
-            metadata, sdn = await _load(request)
+            metadata, sdn = await _load(request, for_write=True)
             store = sdn.setdefault(store_key, {})
             if item_id not in store:
                 raise ApiError(404, f"{store_key} entry does not exist")
@@ -230,20 +191,20 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def ipam_status(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         ipam = str(values(inputs)["ipam"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         if ipam not in (sdn.get("ipams") or {}):
             raise ApiError(404, "ipam does not exist")
         return {"status": "ok", "ipam": ipam}
 
     # vnets + nested
     async def vnets_list(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         return _store_list(sdn.get("vnets") or {}, id_key="vnet")
 
     async def vnets_create(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("vnets", {})
         if vnet in store:
             raise ApiError(400, f"vnet '{vnet}' already exists")
@@ -259,7 +220,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def vnet_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         vnet = str(values(inputs)["vnet"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = (sdn.get("vnets") or {}).get(vnet)
         if not isinstance(item, dict):
             raise ApiError(404, "vnet does not exist")
@@ -268,7 +229,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
     async def vnet_update(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("vnets", {})
         if vnet not in store:
             raise ApiError(404, "vnet does not exist")
@@ -288,7 +249,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def vnet_delete(request: Request, inputs: dict[str, Any]) -> None:
         vnet = str(values(inputs)["vnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("vnets", {})
         if vnet not in store:
             raise ApiError(404, "vnet does not exist")
@@ -307,7 +268,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def subnets_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         vnet = str(values(inputs)["vnet"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         return _store_list(item.get("subnets") or {}, id_key="subnet")
 
@@ -315,7 +276,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
         subnet = str(payload["subnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         subnets = item.setdefault("subnets", {})
         if subnet in subnets:
@@ -331,7 +292,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
         subnet = str(payload["subnet"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         data = (item.get("subnets") or {}).get(subnet)
         if not isinstance(data, dict):
@@ -342,7 +303,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
         subnet = str(payload["subnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         subnets = item.setdefault("subnets", {})
         if subnet not in subnets:
@@ -365,7 +326,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
         subnet = str(payload["subnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         subnets = item.setdefault("subnets", {})
         if subnet not in subnets:
@@ -377,7 +338,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
     async def ips_create(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         ips = item.setdefault("ips", [])
         if not isinstance(ips, list):
@@ -398,7 +359,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
     async def ips_delete(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         ips = item.setdefault("ips", [])
         if not isinstance(ips, list):
@@ -416,14 +377,14 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def fw_options_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         vnet = str(values(inputs)["vnet"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         return dict(item.get("firewall", {}).get("options") or {"enable": 0})
 
     async def fw_options_put(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         options = dict(item.setdefault("firewall", {}).setdefault("options", {"enable": 0}))
         for key, value in payload.items():
@@ -435,7 +396,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def fw_rules_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         vnet = str(values(inputs)["vnet"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         rules = item.get("firewall", {}).get("rules") or []
         return list(rules) if isinstance(rules, list) else []
@@ -443,7 +404,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
     async def fw_rules_create(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         rules = item.setdefault("firewall", {}).setdefault("rules", [])
         if not isinstance(rules, list):
@@ -464,7 +425,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
         pos = int(payload["pos"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         rules = item.setdefault("firewall", {}).setdefault("rules", [])
         if not isinstance(rules, list) or pos < 0 or pos >= len(rules):
@@ -479,7 +440,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         vnet = str(payload["vnet"])
         pos = int(payload["pos"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = await _vnet(sdn, vnet)
         rules = item.setdefault("firewall", {}).setdefault("rules", [])
         if not isinstance(rules, list) or pos < 0 or pos >= len(rules):
@@ -492,7 +453,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         return subdirs("all", "fabric", "node")
 
     async def fabrics_all(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         return _store_list(sdn.get("fabrics") or {}, id_key="id")
 
     async def fabric_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
@@ -501,7 +462,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
     async def fabric_create(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         fabric_id = str(payload["id"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("fabrics", {})
         if fabric_id in store:
             raise ApiError(400, f"fabric '{fabric_id}' already exists")
@@ -514,7 +475,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def fabric_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         fabric_id = str(values(inputs)["id"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = (sdn.get("fabrics") or {}).get(fabric_id)
         if not isinstance(item, dict):
             raise ApiError(404, "fabric does not exist")
@@ -523,7 +484,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
     async def fabric_update(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         fabric_id = str(payload["id"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("fabrics", {})
         if fabric_id not in store:
             raise ApiError(404, "fabric does not exist")
@@ -543,7 +504,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def fabric_delete(request: Request, inputs: dict[str, Any]) -> None:
         fabric_id = str(values(inputs)["id"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("fabrics", {})
         if fabric_id not in store:
             raise ApiError(404, "fabric does not exist")
@@ -554,7 +515,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         await save_cluster_metadata(request, metadata)
 
     async def fabric_nodes_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         fabric_id = values(inputs).get("fabric_id")
         nodes = sdn.get("fabric_nodes") or {}
         result: list[dict[str, Any]] = []
@@ -571,7 +532,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         fabric_id = str(payload["fabric_id"])
         node_id = str(payload["node_id"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         if fabric_id not in (sdn.get("fabrics") or {}):
             raise ApiError(404, "fabric does not exist")
         store = sdn.setdefault("fabric_nodes", {}).setdefault(fabric_id, {})
@@ -588,7 +549,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         fabric_id = str(payload["fabric_id"])
         node_id = str(payload["node_id"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = ((sdn.get("fabric_nodes") or {}).get(fabric_id) or {}).get(node_id)
         if not isinstance(item, dict):
             raise ApiError(404, "fabric node does not exist")
@@ -598,7 +559,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         fabric_id = str(payload["fabric_id"])
         node_id = str(payload["node_id"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("fabric_nodes", {}).setdefault(fabric_id, {})
         if node_id not in store:
             raise ApiError(404, "fabric node does not exist")
@@ -620,7 +581,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         fabric_id = str(payload["fabric_id"])
         node_id = str(payload["node_id"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("fabric_nodes", {}).setdefault(fabric_id, {})
         if node_id not in store:
             raise ApiError(404, "fabric node does not exist")
@@ -630,13 +591,13 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     # prefix lists
     async def prefix_list(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         return _store_list(sdn.get("prefix_lists") or {}, id_key="id")
 
     async def prefix_create(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         list_id = str(payload["id"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("prefix_lists", {})
         if list_id in store:
             raise ApiError(400, f"prefix-list '{list_id}' already exists")
@@ -654,7 +615,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def prefix_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         list_id = str(values(inputs)["id"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = (sdn.get("prefix_lists") or {}).get(list_id)
         if not isinstance(item, dict):
             raise ApiError(404, "prefix-list does not exist")
@@ -663,7 +624,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
     async def prefix_update(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         list_id = str(payload["id"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("prefix_lists", {})
         if list_id not in store:
             raise ApiError(404, "prefix-list does not exist")
@@ -676,7 +637,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def prefix_delete(request: Request, inputs: dict[str, Any]) -> None:
         list_id = str(values(inputs)["id"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         store = sdn.setdefault("prefix_lists", {})
         if list_id not in store:
             raise ApiError(404, "prefix-list does not exist")
@@ -686,7 +647,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def prefix_entries(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         list_id = str(values(inputs)["id"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = (sdn.get("prefix_lists") or {}).get(list_id)
         if not isinstance(item, dict):
             raise ApiError(404, "prefix-list does not exist")
@@ -699,7 +660,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         list_id = str(payload["id"])
         seq = str(payload.get("seq") or secrets.randbelow(10000))
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = (sdn.get("prefix_lists") or {}).get(list_id)
         if not isinstance(item, dict):
             raise ApiError(404, "prefix-list does not exist")
@@ -720,7 +681,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         list_id = str(payload["id"])
         seq = str(payload["url_seq"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = (sdn.get("prefix_lists") or {}).get(list_id)
         if not isinstance(item, dict):
             raise ApiError(404, "prefix-list does not exist")
@@ -733,7 +694,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         list_id = str(payload["id"])
         seq = str(payload["url_seq"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = (sdn.get("prefix_lists") or {}).get(list_id)
         if not isinstance(item, dict):
             raise ApiError(404, "prefix-list does not exist")
@@ -752,7 +713,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         list_id = str(payload["id"])
         seq = str(payload["url_seq"])
-        metadata, sdn = await _load(request)
+        metadata, sdn = await _load(request, for_write=True)
         item = (sdn.get("prefix_lists") or {}).get(list_id)
         if not isinstance(item, dict):
             raise ApiError(404, "prefix-list does not exist")
@@ -767,16 +728,44 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
     async def route_maps_index(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, str]]:
         return subdirs("entries")
 
+    def _route_map_entries(item: object) -> dict[str, Any]:
+        if not isinstance(item, dict):
+            return {}
+        nested = item.get("entries")
+        if isinstance(nested, dict):
+            return {
+                str(key): value
+                for key, value in nested.items()
+                if isinstance(value, dict) and str(key).isdigit()
+            }
+        return {
+            str(key): value
+            for key, value in item.items()
+            if isinstance(value, dict) and str(key).isdigit()
+        }
+
+    def _route_map_entries_mutable(sdn: dict[str, Any], map_id: str) -> dict[str, Any]:
+        bucket = sdn.setdefault("route_maps", {}).setdefault(map_id, {})
+        if not isinstance(bucket, dict):
+            bucket = {}
+            sdn["route_maps"][map_id] = bucket
+        if "entries" in bucket or "name" in bucket:
+            entries = bucket.setdefault("entries", {})
+            if not isinstance(entries, dict):
+                entries = {}
+                bucket["entries"] = entries
+            return entries
+        return bucket
+
     async def route_entries_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         maps = sdn.get("route_maps") or {}
         route_map_id = values(inputs).get("route-map-id")
         result: list[dict[str, Any]] = []
-        for map_id, entries in sorted(maps.items()):
+        for map_id, raw_entries in sorted(maps.items()):
             if route_map_id and map_id != route_map_id:
                 continue
-            if not isinstance(entries, dict):
-                continue
+            entries = _route_map_entries(raw_entries)
             for order, entry in sorted(entries.items(), key=lambda pair: int(pair[0])):
                 result.append({"route-map-id": map_id, "order": int(order), **entry})
         return result
@@ -785,8 +774,8 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         map_id = str(payload["route-map-id"])
         order = str(payload.get("order") or 10)
-        metadata, sdn = await _load(request)
-        entries = sdn.setdefault("route_maps", {}).setdefault(map_id, {})
+        metadata, sdn = await _load(request, for_write=True)
+        entries = _route_map_entries_mutable(sdn, map_id)
         if order in entries:
             raise ApiError(400, f"route-map entry '{order}' already exists")
         entries[order] = {
@@ -809,8 +798,8 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         map_id = str(payload["route-map-id"])
         order = str(payload["order"])
-        _metadata, sdn = await _load(request)
-        entry = ((sdn.get("route_maps") or {}).get(map_id) or {}).get(order)
+        _metadata, sdn = await _load(request, for_write=True)
+        entry = _route_map_entries((sdn.get("route_maps") or {}).get(map_id)).get(order)
         if not isinstance(entry, dict):
             raise ApiError(404, "route-map entry does not exist")
         return {"route-map-id": map_id, "order": int(order), **entry}
@@ -819,8 +808,8 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         map_id = str(payload["route-map-id"])
         order = str(payload["order"])
-        metadata, sdn = await _load(request)
-        entries = sdn.setdefault("route_maps", {}).setdefault(map_id, {})
+        metadata, sdn = await _load(request, for_write=True)
+        entries = _route_map_entries_mutable(sdn, map_id)
         if order not in entries:
             raise ApiError(404, "route-map entry does not exist")
         current = dict(entries[order])
@@ -837,8 +826,8 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         map_id = str(payload["route-map-id"])
         order = str(payload["order"])
-        metadata, sdn = await _load(request)
-        entries = sdn.setdefault("route_maps", {}).setdefault(map_id, {})
+        metadata, sdn = await _load(request, for_write=True)
+        entries = _route_map_entries_mutable(sdn, map_id)
         if order not in entries:
             raise ApiError(404, "route-map entry does not exist")
         del entries[order]
@@ -852,13 +841,13 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def node_zones(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         await require_node(request, str(values(inputs)["node"]))
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         return _store_list(sdn.get("zones") or {}, id_key="zone")
 
     async def node_zone(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         await require_node(request, str(values(inputs)["node"]))
         zone = str(values(inputs)["zone"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         item = (sdn.get("zones") or {}).get(zone)
         if not isinstance(item, dict):
             raise ApiError(404, "zone does not exist")
@@ -866,13 +855,16 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def node_zone_bridges(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         zone = await node_zone(request, inputs)
-        bridge = zone.get("bridge") or f"vmbr-{zone.get('zone')}"
-        return [{"iface": bridge, "active": 1}]
+        bridges = zone.get("bridges")
+        if isinstance(bridges, list):
+            return [dict(item) for item in bridges if isinstance(item, dict)]
+        bridge = zone.get("bridge")
+        return [{"iface": bridge, "active": 1}] if bridge else []
 
     async def node_zone_content(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         await require_node(request, str(values(inputs)["node"]))
         zone = str(values(inputs)["zone"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         return [
             {"vnet": name, **item}
             for name, item in sorted((sdn.get("vnets") or {}).items())
@@ -881,7 +873,11 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def node_zone_ip_vrf(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         zone = await node_zone(request, inputs)
-        return {"zone": zone.get("zone"), "vrf": f"vrf-{zone.get('zone')}", "table": 100}
+        return {
+            "zone": zone.get("zone"),
+            "vrf": zone.get("vrf") or "",
+            "table": zone.get("table") if zone.get("table") is not None else 0,
+        }
 
     async def node_vnet(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         await require_node(request, str(values(inputs)["node"]))
@@ -889,7 +885,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
 
     async def node_vnet_mac_vrf(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         vnet = await node_vnet(request, inputs)
-        return {"vnet": vnet.get("vnet"), "mac-vrf": f"macvrf-{vnet.get('vnet')}"}
+        return {"vnet": vnet.get("vnet"), "mac-vrf": vnet.get("mac-vrf") or ""}
 
     async def node_fabric(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         await require_node(request, str(values(inputs)["node"]))
@@ -901,7 +897,7 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
     ) -> list[dict[str, Any]]:
         await require_node(request, str(values(inputs)["node"]))
         fabric = str(values(inputs)["fabric"])
-        _metadata, sdn = await _load(request)
+        _metadata, sdn = await _load(request, for_write=True)
         nodes = (sdn.get("fabric_nodes") or {}).get(fabric) or {}
         result = []
         for node_id, item in nodes.items():
@@ -919,15 +915,23 @@ def register_sdn_handlers(registry: HandlerRegistry) -> None:
         fabric = str(values(inputs)["fabric"])
         _metadata, sdn = await _load(request)
         nodes = (sdn.get("fabric_nodes") or {}).get(fabric) or {}
-        return [{"node": node_id, "state": "up"} for node_id in sorted(nodes)]
+        return [
+            {
+                "node": node_id,
+                "state": item.get("state") if isinstance(item, dict) else "",
+            }
+            for node_id, item in sorted(nodes.items())
+        ]
 
     async def node_fabric_routes(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         await require_node(request, str(values(inputs)["node"]))
         fabric = str(values(inputs)["fabric"])
         _metadata, sdn = await _load(request)
         item = (sdn.get("fabrics") or {}).get(fabric) or {}
-        prefix = item.get("ip_prefix") or "10.0.0.0/24"
-        return [{"dst": prefix, "protocol": item.get("protocol") or "ospf"}]
+        routes = item.get("routes") if isinstance(item, dict) else None
+        if isinstance(routes, list):
+            return [dict(route) for route in routes if isinstance(route, dict)]
+        return []
 
     # registrations
     registry.register("/cluster/sdn", "GET", index)

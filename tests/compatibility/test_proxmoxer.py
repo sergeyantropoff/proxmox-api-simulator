@@ -25,7 +25,7 @@ def wait_task(proxmox: Any, upid: str) -> dict[str, object]:
 def test_proxmoxer_read_and_qemu_task_flow() -> None:
     proxmox = ProxmoxAPI(
         os.environ["PROXMOXER_HOST"],
-        port=int(os.getenv("PROXMOXER_PORT", "8007")),
+        port=int(os.getenv("PROXMOXER_PORT", "8006")),
         user="root@pam",
         password=os.getenv("PROXMOXER_PASSWORD", "secret"),
         verify_ssl=False,
@@ -33,11 +33,11 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
 
     assert proxmox.version.get()["version"] == "9.2.3"
     assert any(node["node"] == "pve1" for node in proxmox.nodes.get())
-    assert any(vm["vmid"] == 101 for vm in proxmox.nodes("pve1").qemu.get())
+    assert any(vm["vmid"] == 100 for vm in proxmox.nodes("pve1").qemu.get())
 
     token_api = ProxmoxAPI(
         os.environ["PROXMOXER_HOST"],
-        port=int(os.getenv("PROXMOXER_PORT", "8007")),
+        port=int(os.getenv("PROXMOXER_PORT", "8006")),
         user="root@pam",
         token_name=os.getenv("PROXMOXER_TOKEN_NAME", "automation"),
         token_value=os.getenv("PROXMOXER_TOKEN_SECRET", "automation-secret"),
@@ -47,7 +47,7 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
 
     readonly_api = ProxmoxAPI(
         os.environ["PROXMOXER_HOST"],
-        port=int(os.getenv("PROXMOXER_PORT", "8007")),
+        port=int(os.getenv("PROXMOXER_PORT", "8006")),
         user="auditor@pve",
         token_name=os.getenv("PROXMOXER_READONLY_TOKEN_NAME", "readonly"),
         token_value=os.getenv("PROXMOXER_READONLY_TOKEN_SECRET", "readonly-secret"),
@@ -55,9 +55,9 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     )
     assert readonly_api.nodes.get()
     assert readonly_api.nodes("pve1").status.get()["status"] == "online"
-    assert readonly_api.nodes("pve1").qemu("101").config.get()["vmid"] == 101
+    assert readonly_api.nodes("pve1").qemu("100").config.get()["vmid"] == 100
     with pytest.raises(ResourceException) as denied:
-        readonly_api.nodes("pve1").qemu("101").status.start.post()
+        readonly_api.nodes("pve1").qemu("100").status.start.post()
     assert denied.value.status_code == 403
 
     token_endpoint = proxmox.access.users("root@pam").token("ephemeral")
@@ -65,7 +65,7 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     assert created["full-tokenid"] == "root@pam!ephemeral"
     ephemeral = ProxmoxAPI(
         os.environ["PROXMOXER_HOST"],
-        port=int(os.getenv("PROXMOXER_PORT", "8007")),
+        port=int(os.getenv("PROXMOXER_PORT", "8006")),
         user="root@pam",
         token_name=os.getenv("PROXMOXER_EPHEMERAL_TOKEN_NAME", "ephemeral"),
         token_value=created["value"],
@@ -82,13 +82,13 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
 
     storage_api = ProxmoxAPI(
         os.environ["PROXMOXER_HOST"],
-        port=int(os.getenv("PROXMOXER_PORT", "8007")),
+        port=int(os.getenv("PROXMOXER_PORT", "8006")),
         user="storage@pve",
         token_name=os.getenv("PROXMOXER_STORAGE_TOKEN_NAME", "storage"),
         token_value=os.getenv("PROXMOXER_STORAGE_TOKEN_SECRET", "storage-secret"),
         verify_ssl=False,
     )
-    for vmid in ("101", "999999"):
+    for vmid in ("100", "999999"):
         with pytest.raises(ResourceException) as hidden:
             storage_api.nodes("pve1").qemu(vmid).config.get()
         assert hidden.value.status_code == 403
@@ -99,7 +99,7 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
         cores=2,
         memory=1024,
         agent=1,
-        scsi0="local-lvm:vm-150-disk-0,size=8G",
+        scsi0="local-pve1:vm-150-disk-0,size=8G",
     )
     with pytest.raises(ResourceException) as duplicate_create:
         proxmox.nodes("pve1").qemu.post(vmid=150, name="duplicate")
@@ -118,9 +118,9 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     disk_api = proxmox.nodes("pve1").qemu("150")
     assert disk_api.resize.put(disk="scsi0", size="+2G") is None
     assert "size=10G" in disk_api.config.get()["scsi0"]
-    move_upid = disk_api.move_disk.post(disk="scsi0", storage="local")
+    move_upid = disk_api.move_disk.post(disk="scsi0", storage="shared")
     assert wait_task(proxmox, move_upid)["exitstatus"] == "OK"
-    assert disk_api.config.get()["scsi0"].startswith("local:")
+    assert disk_api.config.get()["scsi0"].startswith("shared:")
     assert disk_api.pending.get() == []
     assert wait_task(proxmox, disk_api.status.start.post())["exitstatus"] == "OK"
     assert disk_api.agent.ping.post()["result"] == {}
@@ -169,13 +169,13 @@ def test_proxmoxer_read_and_qemu_task_flow() -> None:
     if os.getenv("PROXMOXER_MUTATION_TEST") == "1":
         operator_api = ProxmoxAPI(
             os.environ["PROXMOXER_HOST"],
-            port=int(os.getenv("PROXMOXER_PORT", "8007")),
+            port=int(os.getenv("PROXMOXER_PORT", "8006")),
             user="operator@pve",
             token_name=os.getenv("PROXMOXER_OPERATOR_TOKEN_NAME", "operator"),
             token_value=os.getenv("PROXMOXER_OPERATOR_TOKEN_SECRET", "operator-secret"),
             verify_ssl=False,
         )
-        status_resource = operator_api.nodes("pve1").qemu("101").status
+        status_resource = operator_api.nodes("pve1").qemu("100").status
 
         def run(operation: str, expected: str) -> None:
             upid = status_resource(operation).post()

@@ -1,3 +1,5 @@
+**Language / Язык:** [English](go.md) | [Русский](../ru/examples/go.md)
+
 # Go
 
 Uses the Go standard library against `http://localhost:8006` with API-token

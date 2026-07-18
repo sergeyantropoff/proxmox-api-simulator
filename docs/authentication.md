@@ -1,3 +1,5 @@
+**Language / Язык:** [English](authentication.md) | [Русский](ru/authentication.md)
+
 # Authentication
 
 The simulator implements Proxmox-compatible ticket and API-token authentication
@@ -54,8 +56,9 @@ beyond its owner.
 
 ## Seeded development principals
 
-Loaded by every standard seed profile (unless replaced by UI demo unload →
-`minimal`):
+Seeded for **every** profile — including `minimal` and after Web UI demo unload.
+Unload shrinks guests/nodes/storages; lab principals and tokens are still
+inserted by `apply_seed`:
 
 | Principal | Password | Token | Notes |
 |---|---|---|---|

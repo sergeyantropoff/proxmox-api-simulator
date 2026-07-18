@@ -19,30 +19,8 @@ from app.handlers.common import (
 
 
 def _config(metadata: dict[str, Any]) -> dict[str, Any]:
-    current = metadata.setdefault(
-        "cluster_config",
-        {
-            "clustername": "pve-simulator",
-            "votes": 1,
-            "links": {},
-            "join_info": {},
-            "totem": {"version": 2, "secauth": "on", "cluster_name": "pve-simulator"},
-            "qdevice": {"status": "disabled"},
-            "apiversion": 1,
-        },
-    )
-    if not isinstance(current, dict):
-        current = {
-            "clustername": "pve-simulator",
-            "votes": 1,
-            "links": {},
-            "join_info": {},
-            "totem": {"version": 2, "secauth": "on", "cluster_name": "pve-simulator"},
-            "qdevice": {"status": "disabled"},
-            "apiversion": 1,
-        }
-        metadata["cluster_config"] = current
-    return current
+    current = metadata.get("cluster_config")
+    return current if isinstance(current, dict) else {}
 
 
 def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
@@ -52,10 +30,12 @@ def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
     async def create(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         metadata = await cluster_metadata(request)
-        config = _config(metadata)
+        config = dict(_config(metadata))
         if payload.get("clustername"):
             config["clustername"] = str(payload["clustername"])
-            config.setdefault("totem", {})["cluster_name"] = str(payload["clustername"])
+            totem = dict(config.get("totem") or {})
+            totem["cluster_name"] = str(payload["clustername"])
+            config["totem"] = totem
         if "votes" in payload:
             config["votes"] = payload["votes"]
         if "nodeid" in payload:
@@ -64,6 +44,7 @@ def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
         if links:
             config["links"] = links
         config["token"] = secrets.token_hex(16)
+        metadata["cluster_config"] = config
         await save_cluster_metadata(request, metadata)
         await database(request).pool.execute(
             """UPDATE clusters
@@ -97,11 +78,11 @@ def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
     async def join_post(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         metadata = await cluster_metadata(request)
-        config = _config(metadata)
+        config = dict(_config(metadata))
         hostname = str(payload.get("hostname") or payload.get("node") or "")
         if not hostname:
             raise ApiError(400, "parameter verification failed - 'hostname' missing")
-        joins = config.setdefault("join_info", {})
+        joins = dict(config.get("join_info") or {})
         joins[hostname] = {
             "hostname": hostname,
             "fingerprint": payload.get("fingerprint"),
@@ -112,6 +93,8 @@ def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
         # password accepted but not stored in clear form
         if payload.get("password"):
             joins[hostname]["password_set"] = True
+        config["join_info"] = joins
+        metadata["cluster_config"] = config
         exists = await database(request).pool.fetchval(
             "SELECT EXISTS(SELECT 1 FROM nodes WHERE name=$1)",
             hostname,
@@ -128,14 +111,19 @@ def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
         rows = await database(request).pool.fetch("SELECT name, status FROM nodes ORDER BY name")
         metadata = await cluster_metadata(request)
         config = _config(metadata)
+        added_raw = config.get("added_nodes")
+        added: dict[str, Any] = dict(added_raw) if isinstance(added_raw, dict) else {}
         result = []
         for index, row in enumerate(rows, start=1):
+            name = str(row["name"])
+            entry_raw = added.get(name)
+            entry: dict[str, Any] = dict(entry_raw) if isinstance(entry_raw, dict) else {}
             result.append(
                 {
-                    "node": str(row["name"]),
-                    "nodeid": index,
-                    "ring0_addr": f"{row['name']}.local",
-                    "quorum_votes": config.get("votes", 1),
+                    "node": name,
+                    "nodeid": entry.get("nodeid", index),
+                    "ring0_addr": entry.get("ring0_addr", ""),
+                    "quorum_votes": entry.get("quorum_votes", config.get("votes", 0)),
                 }
             )
         return result
@@ -144,8 +132,8 @@ def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         node = str(payload["node"])
         metadata = await cluster_metadata(request)
-        config = _config(metadata)
-        added = config.setdefault("added_nodes", {})
+        config = dict(_config(metadata))
+        added = dict(config.get("added_nodes") or {})
         added[node] = {
             "node": node,
             "nodeid": payload.get("nodeid"),
@@ -153,10 +141,14 @@ def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
             "votes": payload.get("votes", 1),
             "apiversion": payload.get("apiversion"),
             "force": payload.get("force"),
+            "ring0_addr": payload.get("ring0_addr") or f"{node}.local",
+            "quorum_votes": payload.get("quorum_votes", payload.get("votes", 1)),
         }
         links = {key: value for key, value in payload.items() if key.startswith("link")}
         if links:
             added[node]["links"] = links
+        config["added_nodes"] = added
+        metadata["cluster_config"] = config
         exists = await database(request).pool.fetchval(
             "SELECT EXISTS(SELECT 1 FROM nodes WHERE name=$1)",
             node,
@@ -172,11 +164,14 @@ def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
     async def nodes_delete(request: Request, inputs: dict[str, Any]) -> None:
         node = str(values(inputs)["node"])
         metadata = await cluster_metadata(request)
-        config = _config(metadata)
-        added = config.setdefault("added_nodes", {})
+        config = dict(_config(metadata))
+        added = dict(config.get("added_nodes") or {})
         added.pop(node, None)
-        joins = config.setdefault("join_info", {})
+        joins = dict(config.get("join_info") or {})
         joins.pop(node, None)
+        config["added_nodes"] = added
+        config["join_info"] = joins
+        metadata["cluster_config"] = config
         await save_cluster_metadata(request, metadata)
         # Keep node row; mark offline to avoid cascading guest deletes.
         await database(request).pool.execute(
@@ -186,11 +181,13 @@ def register_cluster_config_handlers(registry: HandlerRegistry) -> None:
 
     async def qdevice(request: Request, _inputs: dict[str, Any]) -> dict[str, Any]:
         metadata = await cluster_metadata(request)
-        return dict(_config(metadata).get("qdevice") or {"status": "disabled"})
+        qdevice = _config(metadata).get("qdevice")
+        return dict(qdevice) if isinstance(qdevice, dict) else {}
 
     async def totem(request: Request, _inputs: dict[str, Any]) -> dict[str, Any]:
         metadata = await cluster_metadata(request)
-        return dict(_config(metadata).get("totem") or {})
+        totem = _config(metadata).get("totem")
+        return dict(totem) if isinstance(totem, dict) else {}
 
     registry.register("/cluster/config", "GET", index)
     registry.register("/cluster/config", "POST", create)

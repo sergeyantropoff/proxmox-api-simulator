@@ -159,16 +159,16 @@ async def probe_major(
         verb = method.verb.upper()
         url = f"/api2/json{render_path(path_template)}"
         headers = {"CSRFPreventionToken": csrf} if verb != "GET" else {}
-        body = body_for(method, path_template) if verb in {"PUT", "POST"} else None
+        payload = body_for(method, path_template)
         try:
             if verb == "GET":
-                response = await client.get(url, headers=headers)
+                response = await client.get(url, headers=headers, params=payload or None)
             elif verb == "PUT":
-                response = await client.put(url, data=body or {}, headers=headers)
+                response = await client.put(url, data=payload or {}, headers=headers)
             elif verb == "POST":
-                response = await client.post(url, data=body or {}, headers=headers)
+                response = await client.post(url, data=payload or {}, headers=headers)
             elif verb == "DELETE":
-                response = await client.delete(url, headers=headers)
+                response = await client.request("DELETE", url, data=payload or {}, headers=headers)
             else:
                 continue
         except Exception as exc:

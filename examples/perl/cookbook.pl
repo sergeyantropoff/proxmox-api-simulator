@@ -10,7 +10,7 @@ sub uri_escape {
     return $value;
 }
 
-my $base  = $ENV{PVE_BASE}  // 'http://localhost:8006/api2/json';
+my $base  = $ENV{PVE_BASE}  // 'https://localhost:8006/api2/json';
 my $node  = $ENV{PVE_NODE}  // 'pve01';
 my $vmid  = $ENV{PVE_VMID}  // '115';
 my $token = $ENV{PVE_API_TOKEN} // 'root@pam!automation=automation-secret';

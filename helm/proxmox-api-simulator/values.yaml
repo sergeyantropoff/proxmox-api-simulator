@@ -1,5 +1,9 @@
 ## Default values for proxmox-api-simulator.
 ## Image: https://hub.docker.com/r/inecs/proxmox-api-simulator
+##
+## Laboratory / CI defaults only. Replace secret.ticketSigningKey and
+## postgresql.auth.password before any shared or Internet-facing install.
+## See ../../SECURITY.md.
 
 replicaCount: 1
 

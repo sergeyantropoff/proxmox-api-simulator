@@ -15,7 +15,7 @@ import pulumi
 import requests
 
 config = pulumi.Config()
-base = config.get("base") or "http://localhost:8006/api2/json"
+base = config.get("base") or "https://localhost:8006/api2/json"
 node = config.get("node") or "pve01"
 vmid = int(config.get("vmid") or "118")
 token = config.get_secret("token") or "root@pam!automation=automation-secret"

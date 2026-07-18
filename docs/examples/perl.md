@@ -1,3 +1,5 @@
+**Language / Язык:** [English](perl.md) | [Русский](../ru/examples/perl.md)
+
 # Perl
 
 `HTTP::Tiny` + JSON cookbook with API-token auth.

@@ -1,3 +1,5 @@
+**Language / Язык:** [English](python-proxmoxer.md) | [Русский](../ru/examples/python-proxmoxer.md)
+
 # Python — proxmoxer
 
 Canonical library path against the HTTPS gateway.
@@ -11,7 +13,7 @@ python examples/python/proxmoxer_cookbook.py
 ```
 
 Environment overrides: `PVE_HOST` (default `localhost`), `PVE_PORT` (default
-`8007`), `PVE_USER`, `PVE_PASSWORD`, or token via `PVE_TOKEN_NAME` /
+`8006`), `PVE_USER`, `PVE_PASSWORD`, or token via `PVE_TOKEN_NAME` /
 `PVE_TOKEN_VALUE`.
 
 ## Notes

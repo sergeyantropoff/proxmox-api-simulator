@@ -1,3 +1,5 @@
+**Language / Язык:** [English](pulumi.md) | [Русский](../ru/examples/pulumi.md)
+
 # Pulumi
 
 Python Pulumi program that drives the simulator over HTTPS using token auth via

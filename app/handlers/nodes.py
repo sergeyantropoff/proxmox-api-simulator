@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from typing import Any, cast
 
 from fastapi import Request
@@ -20,92 +19,13 @@ from app.handlers.common import (
 from app.tasks.repository import TaskRepository
 from app.tasks.upid import Upid
 
-DEFAULT_NODE_OPS: dict[str, Any] = {
-    "network": [
-        {
-            "iface": "vmbr0",
-            "type": "bridge",
-            "active": 1,
-            "method": "static",
-            "address": "10.0.0.10/24",
-        },
-        {
-            "iface": "vmbr1",
-            "type": "bridge",
-            "active": 1,
-            "method": "static",
-            "address": "10.10.0.10/24",
-        },
-        {"iface": "eno1", "type": "eth", "active": 1, "method": "manual"},
-    ],
-    "disks": {
-        "list": [
-            {
-                "devpath": "/dev/sda",
-                "size": 1_000_000_000_000,
-                "model": "SIM-DISK-01",
-                "serial": "SIM0001",
-                "gpt": 1,
-            },
-            {
-                "devpath": "/dev/sdb",
-                "size": 2_000_000_000_000,
-                "model": "SIM-SSD-01",
-                "serial": "SIM0002",
-                "gpt": 0,
-            },
-        ],
-        "directory": [],
-        "lvm": [],
-        "lvmthin": [],
-        "zfs": [],
-        "smart": {},
-    },
-    "services": {
-        "pveproxy": {"state": "running", "enabled": 1},
-        "pvedaemon": {"state": "running", "enabled": 1},
-        "pvestatd": {"state": "running", "enabled": 1},
-        "corosync": {"state": "running", "enabled": 1},
-    },
-    "apt": {
-        "packages": [
-            {
-                "Package": "pve-manager",
-                "Version": "9.2.3",
-                "OldVersion": "9.2.2",
-                "Status": "upgradable",
-            },
-            {"Package": "libpve-common-perl", "Version": "9.0.3", "Status": "installed"},
-        ],
-        "repositories": [
-            {
-                "path": "/etc/apt/sources.list.d/pve-enterprise.list",
-                "enabled": 1,
-                "types": "deb",
-                "uri": "http://download.proxmox.com/debian/pve",
-                "suites": "bookworm",
-                "components": "pve-no-subscription",
-            }
-        ],
-        "update": {"status": "stopped", "exitstatus": "OK"},
-        "changelogs": {},
-    },
-}
-
-
-def default_node_ops() -> dict[str, Any]:
-    return copy.deepcopy(DEFAULT_NODE_OPS)
-
 
 async def load_node_ops(request: Request, node: str) -> dict[str, Any]:
     metadata = await node_metadata(request, node)
     ops = metadata.get("ops")
-    if isinstance(ops, dict) and ops:
+    if isinstance(ops, dict):
         return ops
-    ops = default_node_ops()
-    metadata["ops"] = ops
-    await save_node_metadata(request, node, metadata)
-    return ops
+    return {}
 
 
 async def save_node_ops(request: Request, node: str, ops: dict[str, Any]) -> None:
@@ -135,19 +55,18 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
         node = str(values(inputs)["node"])
         name = str(values(inputs).get("name") or "pve-manager")
         ops = await load_node_ops(request, node)
-        changelogs = ops.setdefault("apt", {}).setdefault("changelogs", {})
-        if name not in changelogs:
-            changelogs[name] = f"simulated changelog for {name}\n\n  * emulator build\n"
-            await save_node_ops(request, node, ops)
-        return str(changelogs[name])
+        apt = ops.get("apt")
+        changelogs = apt.get("changelogs") if isinstance(apt, dict) else None
+        if not isinstance(changelogs, dict):
+            return ""
+        return str(changelogs.get(name) or "")
 
     async def apt_update_status(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         node = str(values(inputs)["node"])
         ops = await load_node_ops(request, node)
-        update = ops.get("apt", {}).get("update", {"status": "stopped", "exitstatus": "OK"})
-        if isinstance(update, dict):
-            return dict(update)
-        return {"status": "stopped", "exitstatus": "OK"}
+        apt = ops.get("apt")
+        update = apt.get("update") if isinstance(apt, dict) else None
+        return dict(update) if isinstance(update, dict) else {}
 
     async def apt_update_start(request: Request, inputs: dict[str, Any]) -> str:
         node = str(values(inputs)["node"])
@@ -230,11 +149,9 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
 
     async def _disks(request: Request, node: str) -> dict[str, Any]:
         ops = await load_node_ops(request, node)
-        disks = ops.setdefault("disks", default_node_ops()["disks"])
+        disks = ops.get("disks")
         if not isinstance(disks, dict):
-            disks = default_node_ops()["disks"]
-            ops["disks"] = disks
-            await save_node_ops(request, node, ops)
+            return {}
         return cast(dict[str, Any], disks)
 
     async def disks_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
@@ -247,17 +164,9 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
         node = str(values(inputs)["node"])
         disk = str(values(inputs).get("disk") or "/dev/sda")
         disks = await _disks(request, node)
-        smart = disks.setdefault("smart", {})
-        if disk not in smart:
-            smart[disk] = {
-                "health": "PASSED",
-                "type": "scsi",
-                "model": "SIM-DISK",
-                "serial": disk.rsplit("/", 1)[-1],
-            }
-            ops = await load_node_ops(request, node)
-            ops["disks"] = disks
-            await save_node_ops(request, node, ops)
+        smart = disks.get("smart")
+        if not isinstance(smart, dict) or disk not in smart:
+            return {}
         return dict(smart[disk])
 
     async def disks_collection(
@@ -286,7 +195,10 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
         if not disk:
             raise ApiError(400, "parameter verification failed - 'disk' missing")
         ops = await load_node_ops(request, node)
-        disks = ops.setdefault("disks", default_node_ops()["disks"])
+        disks = ops.get("disks")
+        if not isinstance(disks, dict):
+            disks = {}
+            ops["disks"] = disks
         items = list(disks.get("list") or [])
         found = False
         for item in items:
@@ -314,7 +226,9 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
         if not disk:
             raise ApiError(400, "parameter verification failed - 'disk' missing")
         ops = await load_node_ops(request, node)
-        disks = ops.setdefault("disks", default_node_ops()["disks"])
+        disks = ops.get("disks")
+        if not isinstance(disks, dict):
+            raise ApiError(404, "disk does not exist")
         items = list(disks.get("list") or [])
         for item in items:
             if item.get("devpath") == disk:
@@ -324,8 +238,9 @@ def register_node_ops_handlers(registry: HandlerRegistry) -> None:
         else:
             raise ApiError(404, "disk does not exist")
         disks["list"] = items
-        smart = disks.setdefault("smart", {})
-        smart.pop(disk, None)
+        smart = disks.get("smart")
+        if isinstance(smart, dict):
+            smart.pop(disk, None)
         ops["disks"] = disks
         await save_node_ops(request, node, ops)
 

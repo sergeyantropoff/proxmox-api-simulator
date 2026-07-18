@@ -13,53 +13,40 @@ from app.handlers.common import cluster_metadata, save_cluster_metadata, subdirs
 
 _SECRET_KEYS = frozenset({"token", "password", "secret"})
 
-DEFAULT_MATCHER_FIELDS = [
-    {"name": "type", "type": "string"},
-    {"name": "hostname", "type": "string"},
-    {"name": "job-id", "type": "string"},
-    {"name": "severity", "type": "string"},
-]
-
-DEFAULT_MATCHER_FIELD_VALUES = [
-    {"field": "type", "value": "fencing"},
-    {"field": "type", "value": "package-updates"},
-    {"field": "type", "value": "replication"},
-    {"field": "type", "value": "system-mail"},
-]
-
 
 def _public(endpoint: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in endpoint.items() if key not in _SECRET_KEYS}
 
 
 def _notifications(metadata: dict[str, Any]) -> dict[str, Any]:
-    current = metadata.setdefault(
-        "notifications",
-        {
-            "endpoints": {
-                "gotify": {},
-                "sendmail": {},
-                "smtp": {},
-                "webhook": {},
-            },
-            "matchers": {},
-            "tests": [],
-        },
-    )
+    current = metadata.get("notifications")
     if not isinstance(current, dict):
-        current = {
+        return {
             "endpoints": {"gotify": {}, "sendmail": {}, "smtp": {}, "webhook": {}},
             "matchers": {},
             "tests": [],
         }
-        metadata["notifications"] = current
-    current.setdefault(
-        "endpoints",
-        {"gotify": {}, "sendmail": {}, "smtp": {}, "webhook": {}},
+    endpoints = current.get("endpoints")
+    if not isinstance(endpoints, dict):
+        endpoints = {}
+    result = {
+        key: value
+        for key, value in current.items()
+        if key not in {"endpoints", "matchers", "tests"}
+    }
+    result["endpoints"] = {
+        "gotify": dict(endpoints["gotify"]) if isinstance(endpoints.get("gotify"), dict) else {},
+        "sendmail": (
+            dict(endpoints["sendmail"]) if isinstance(endpoints.get("sendmail"), dict) else {}
+        ),
+        "smtp": dict(endpoints["smtp"]) if isinstance(endpoints.get("smtp"), dict) else {},
+        "webhook": dict(endpoints["webhook"]) if isinstance(endpoints.get("webhook"), dict) else {},
+    }
+    result["matchers"] = (
+        dict(current["matchers"]) if isinstance(current.get("matchers"), dict) else {}
     )
-    current.setdefault("matchers", {})
-    current.setdefault("tests", [])
-    return current
+    result["tests"] = list(current["tests"]) if isinstance(current.get("tests"), list) else []
+    return result
 
 
 def register_notifications_handlers(registry: HandlerRegistry) -> None:
@@ -80,26 +67,28 @@ def register_notifications_handlers(registry: HandlerRegistry) -> None:
 
         async def list_endpoints(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
             metadata = await cluster_metadata(request)
-            store = _notifications(metadata)["endpoints"].setdefault(kind, {})
+            store = _notifications(metadata)["endpoints"].get(kind) or {}
             return [_public({"name": name, **item}) for name, item in sorted(store.items())]
 
         async def create(request: Request, inputs: dict[str, Any]) -> None:
             payload = values(inputs)
             name = str(payload["name"])
             metadata = await cluster_metadata(request)
-            store = _notifications(metadata)["endpoints"].setdefault(kind, {})
+            notifications = _notifications(metadata)
+            store = notifications["endpoints"].setdefault(kind, {})
             if name in store:
                 raise ApiError(400, f"{kind} endpoint '{name}' already exists")
             entry = {key: payload[key] for key in create_keys if key in payload}
             entry["name"] = name
             entry.setdefault("disable", 0)
             store[name] = entry
+            metadata["notifications"] = notifications
             await save_cluster_metadata(request, metadata)
 
         async def get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
             name = str(values(inputs)["name"])
             metadata = await cluster_metadata(request)
-            store = _notifications(metadata)["endpoints"].setdefault(kind, {})
+            store = _notifications(metadata)["endpoints"].get(kind) or {}
             if name not in store:
                 raise ApiError(404, f"{kind} endpoint does not exist")
             return _public({"name": name, **store[name]})
@@ -108,7 +97,8 @@ def register_notifications_handlers(registry: HandlerRegistry) -> None:
             payload = values(inputs)
             name = str(payload["name"])
             metadata = await cluster_metadata(request)
-            store = _notifications(metadata)["endpoints"].setdefault(kind, {})
+            notifications = _notifications(metadata)
+            store = notifications["endpoints"].setdefault(kind, {})
             if name not in store:
                 raise ApiError(404, f"{kind} endpoint does not exist")
             current = dict(store[name])
@@ -123,15 +113,18 @@ def register_notifications_handlers(registry: HandlerRegistry) -> None:
                 current[key] = value
             current["name"] = name
             store[name] = current
+            metadata["notifications"] = notifications
             await save_cluster_metadata(request, metadata)
 
         async def delete(request: Request, inputs: dict[str, Any]) -> None:
             name = str(values(inputs)["name"])
             metadata = await cluster_metadata(request)
-            store = _notifications(metadata)["endpoints"].setdefault(kind, {})
+            notifications = _notifications(metadata)
+            store = notifications["endpoints"].setdefault(kind, {})
             if name not in store:
                 raise ApiError(404, f"{kind} endpoint does not exist")
             del store[name]
+            metadata["notifications"] = notifications
             await save_cluster_metadata(request, metadata)
 
         registry.register(base, "GET", list_endpoints)
@@ -149,12 +142,14 @@ def register_notifications_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         name = str(payload["name"])
         metadata = await cluster_metadata(request)
-        store = _notifications(metadata)["matchers"]
+        notifications = _notifications(metadata)
+        store = notifications["matchers"]
         if name in store:
             raise ApiError(400, f"matcher '{name}' already exists")
         store[name] = {
             key: value for key, value in payload.items() if key not in {"delete", "digest"}
         }
+        metadata["notifications"] = notifications
         await save_cluster_metadata(request, metadata)
 
     async def matchers_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -169,7 +164,8 @@ def register_notifications_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         name = str(payload["name"])
         metadata = await cluster_metadata(request)
-        store = _notifications(metadata)["matchers"]
+        notifications = _notifications(metadata)
+        store = notifications["matchers"]
         if name not in store:
             raise ApiError(404, "matcher does not exist")
         current = dict(store[name])
@@ -183,24 +179,35 @@ def register_notifications_handlers(registry: HandlerRegistry) -> None:
             current[key] = value
         current["name"] = name
         store[name] = current
+        metadata["notifications"] = notifications
         await save_cluster_metadata(request, metadata)
 
     async def matchers_delete(request: Request, inputs: dict[str, Any]) -> None:
         name = str(values(inputs)["name"])
         metadata = await cluster_metadata(request)
-        store = _notifications(metadata)["matchers"]
+        notifications = _notifications(metadata)
+        store = notifications["matchers"]
         if name not in store:
             raise ApiError(404, "matcher does not exist")
         del store[name]
+        metadata["notifications"] = notifications
         await save_cluster_metadata(request, metadata)
 
-    async def matcher_fields(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        return list(DEFAULT_MATCHER_FIELDS)
+    async def matcher_fields(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        metadata = await cluster_metadata(request)
+        fields = _notifications(metadata).get("matcher_fields")
+        if isinstance(fields, list):
+            return [dict(item) for item in fields if isinstance(item, dict)]
+        return []
 
     async def matcher_field_values(
-        _request: Request, _inputs: dict[str, Any]
+        request: Request, _inputs: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        return list(DEFAULT_MATCHER_FIELD_VALUES)
+        metadata = await cluster_metadata(request)
+        values_list = _notifications(metadata).get("matcher_field_values")
+        if isinstance(values_list, list):
+            return [dict(item) for item in values_list if isinstance(item, dict)]
+        return []
 
     async def targets(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
         metadata = await cluster_metadata(request)
@@ -231,10 +238,10 @@ def register_notifications_handlers(registry: HandlerRegistry) -> None:
                 break
         if not found:
             raise ApiError(404, "notification target does not exist")
-        tests = notifications.setdefault("tests", [])
-        if not isinstance(tests, list):
-            tests = notifications["tests"] = []
+        tests = list(notifications.get("tests") or [])
         tests.append({"name": name, "tested_at": int(time.time()), "ok": True})
+        notifications["tests"] = tests
+        metadata["notifications"] = notifications
         await save_cluster_metadata(request, metadata)
 
     registry.register("/cluster/notifications", "GET", index)

@@ -1,3 +1,5 @@
+**Language / Язык:** [English](compatibility-0.1.0.md) | [Русский](ru/compatibility-0.1.0.md)
+
 # Compatibility report — 0.1.0
 
 This report records evidence for simulator release 0.1.0 against the bundled

@@ -40,12 +40,16 @@ packages = ["app"]
 [tool.ruff]
 target-version = "py313"
 line-length = 100
+# Native client suites under pulumi-tests/ are generated and linted by their
+# own runners; keep the product CI gate focused on the simulator package.
+exclude = ["pulumi-tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S105"]
+"examples/**/*.py" = ["S101", "S105", "S106"]
 
 [tool.mypy]
 python_version = "3.13"

@@ -1,3 +1,5 @@
+**Language / Язык:** [English](observability.md) | [Русский](ru/observability.md)
+
 # Observability
 
 ## Health

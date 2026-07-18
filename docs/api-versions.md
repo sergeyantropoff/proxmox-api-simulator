@@ -1,3 +1,5 @@
+**Language / Язык:** [English](api-versions.md) | [Русский](ru/api-versions.md)
+
 # API versions (PVE 6–9)
 
 The simulator ships authoritative imported contracts for four Proxmox VE majors.

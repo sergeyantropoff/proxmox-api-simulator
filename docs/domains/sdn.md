@@ -1,3 +1,5 @@
+**Language / Язык:** [English](sdn.md) | [Русский](../ru/domains/sdn.md)
+
 # SDN
 
 Software-defined networking handlers cover declared zones, VNets, subnets,

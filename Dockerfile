@@ -16,7 +16,9 @@ FROM python:3.13-slim AS runtime
 ARG APP_VERSION=0.1.0
 LABEL org.opencontainers.image.title="proxmox-api-simulator" \
       org.opencontainers.image.version="$APP_VERSION" \
-      org.opencontainers.image.source="https://github.com/example/proxmox-api-simulator"
+      org.opencontainers.image.description="Stateful Proxmox VE API simulator for labs and CI" \
+      org.opencontainers.image.source="https://github.com/sergeyantropoff/proxmox-api-simulator" \
+      org.opencontainers.image.licenses="Apache-2.0"
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

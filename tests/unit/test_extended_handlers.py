@@ -66,7 +66,11 @@ class HandlerPool:
     async def fetchrow(self, sql: str, *args: object) -> dict[str, object] | None:
         del args
         if "FROM nodes WHERE name" in sql:
-            return {"name": "pve01", "status": "online"} if self.node_exists else None
+            if not self.node_exists:
+                return None
+            if "metadata" in sql:
+                return {"metadata": "{}"}
+            return {"name": "pve01", "status": "online"}
         if "FROM clusters" in sql:
             return {"metadata": '{"options":{"keyboard":"de-ch"}}'}
         if "FROM storages" in sql:
@@ -156,7 +160,7 @@ async def test_storage_and_ceph_handlers() -> None:
     )
     assert osds[0]["status"] == "up"
     ceph_status = await _call(registry.get("/cluster/ceph/status", "GET"), {})
-    assert ceph_status["osdmap"]["num_osds"] == 300
+    assert ceph_status["osdmap"]["num_osds"] == 1
 
 
 @pytest.mark.asyncio

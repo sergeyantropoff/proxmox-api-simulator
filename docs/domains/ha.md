@@ -1,3 +1,5 @@
+**Language / Язык:** [English](ha.md) | [Русский](../ru/domains/ha.md)
+
 # HA
 
 High-availability groups, resources, status, and rules persist in cluster

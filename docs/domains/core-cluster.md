@@ -1,3 +1,5 @@
+**Language / Язык:** [English](core-cluster.md) | [Русский](../ru/domains/core-cluster.md)
+
 # Core & cluster
 
 ## Version
