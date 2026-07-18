@@ -554,10 +554,10 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
                     }
                 )
         else:
-            path = payload.get("path")
+            target_path = payload.get("path")
             index = payload.get("index")
             for file_idx, file_entry in enumerate(files):
-                if path is not None and file_entry.get("path") != path:
+                if target_path is not None and file_entry.get("path") != target_path:
                     continue
                 repos = [
                     dict(item)
@@ -584,7 +584,7 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
                                 }
                             },
                         }
-                elif path is not None or file_idx == 0:
+                elif target_path is not None or file_idx == 0:
                     if repos:
                         repos[0] = {
                             **repos[0],
@@ -604,7 +604,7 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
                             },
                         }
                 file_entry["repositories"] = repos
-                if path is not None:
+                if target_path is not None:
                     break
         apt["repositories"] = {
             "digest": secrets.token_hex(4),

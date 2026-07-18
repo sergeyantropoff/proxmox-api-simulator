@@ -19,6 +19,7 @@ Yes. That is a primary use case. Pin the API major, seed a profile, and point
 clients at **HTTP `:8006`** (Compose) or your Ingress **HTTPS** hostname on
 Kubernetes. See [Clients](clients.md). For the
 Pulumi surface suite see [`pulumi-tests/`](../pulumi-tests/README.md).
+Full test map and latest recorded results: [Testing](testing.md).
 
 ## Why do some OpenID / LDAP / ACME / Ceph calls “succeed” without remotes?
 

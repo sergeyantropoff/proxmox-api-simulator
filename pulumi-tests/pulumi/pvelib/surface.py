@@ -44,7 +44,7 @@ _UPID_RE = re.compile(
 )
 
 _PATH_PARAM_EXAMPLES: dict[str, object] = {
-    "node": "pve01",
+    "node": "pve1",
     "vmid": 100,
     "storage": "local",
     "pool": "testpool",
@@ -53,7 +53,7 @@ _PATH_PARAM_EXAMPLES: dict[str, object] = {
     "realm": "pam",
     "group": "admins",
     "role": "Administrator",
-    "upid": "UPID:pve01:00000001:00000001:65000001:qmstart:100:root@pam:",
+    "upid": "UPID:pve1:00000001:00000001:65000001:qmstart:100:root@pam:",
     "snapname": "snap1",
     "volume": "local:100/vm-100-disk-0.qcow2",
     "disk": "scsi0",
@@ -89,7 +89,7 @@ _EXTRA_PATH: dict[str, object] = {
     "cidr": "10.0.0.0/24",
     "tokenid": "automation",
     "fabric_id": "fab1",
-    "node_id": "pve01",
+    "node_id": "pve1",
     "url_seq": "1",
     "route-map-id": "rm1",
     "order": "10",

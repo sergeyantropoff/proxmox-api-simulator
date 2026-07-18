@@ -27,9 +27,11 @@
 | [FAQ](faq.md) | Краткие ответы |
 | [Архитектура](architecture.md) | Границы компонентов |
 | [Совместимость](compatibility.md) | Модель evidence и матрица релизов |
+| [Тесты](testing.md) | Карта наборов, Make-цели, последние результаты |
 
 Исполняемые cookbook'и: [`examples/`](../../examples/README.ru.md).
 Интеграционные наборы: [`pulumi-tests/`](../../pulumi-tests/README.ru.md).
+Карта тестов и последние прогоны: [Тесты](testing.md).
 
 ## См. также
 

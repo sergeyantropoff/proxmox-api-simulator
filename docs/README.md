@@ -27,9 +27,11 @@ page. Russian mirrors live under [`ru/`](ru/README.md).
 | [FAQ](faq.md) | Short answers |
 | [Architecture](architecture.md) | Component boundaries |
 | [Compatibility](compatibility.md) | Evidence model and release matrix |
+| [Testing](testing.md) | Suites layout, Make targets, latest results |
 
 Runnable cookbooks: [`examples/`](../examples/README.md).
 Integration suites: [`pulumi-tests/`](../pulumi-tests/README.md).
+Test map and latest pass notes: [Testing](testing.md).
 
 ## See also
 

@@ -36,6 +36,9 @@ GitHub Actions на каждый push/PR в `main` запускает `make ci` 
 Compose/Helm. Перед крупными API/клиентскими изменениями локально прогоняйте
 `make ci-all`, `make helm-lint` и `make pulumi-tests`.
 
+Карта наборов, Make-цели и последние записанные локальные результаты:
+[docs/ru/testing.md](docs/ru/testing.md).
+
 ## Важные правила проекта
 
 1. Мутации должны **persist в PostgreSQL** (таблицы и/или jsonb metadata).

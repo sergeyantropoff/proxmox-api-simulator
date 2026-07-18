@@ -58,7 +58,7 @@ CSRF=$(echo "$TICKET" | jq -r .data.CSRFPreventionToken)
 curl -s -b /tmp/pve.ck http://localhost:8006/api2/json/version | jq .
 curl -s -b /tmp/pve.ck -H "CSRFPreventionToken: $CSRF" \
   -d 'vmid=100&name=demo' \
-  http://localhost:8006/api2/json/nodes/pve01/qemu | jq .
+  http://localhost:8006/api2/json/nodes/pve1/qemu | jq .
 ```
 
 Open the HTML report: `pulumi-tests/pulumi/reports/report.html`.
@@ -67,4 +67,12 @@ Provider env (set by Compose): `PROXMOX_VE_ENDPOINT=https://tls-gateway:8443/`
 (internal suite TLS — `pulumi-proxmoxve` rejects `http://`), plus username/password
 /`INSECURE`. Surface probe uses `API_URL=http://simulator:8006`. Host lab URL
 remains plain `http://localhost:8006/` (Kubernetes HTTPS is Ingress-only).
-Seed for CI/suite: `SEED_PROFILE=small` (Compose default).
+Seed for CI/suite: `SEED_PROFILE=small` (Compose default). Default node name in
+that profile is **`pve1`** (not `pve01`).
+
+## Latest local results (2026-07-18)
+
+`make pulumi-tests` → **Suite PASS** (~28s): lifecycle OK; surface majors
+6.4-15 / 7.4-16 / 8.4.5 / 9.2.3 with `critical=0`; coverage **2324/2324**.
+Report: `pulumi/reports/report.html`. Broader CI notes:
+[docs/testing.md](../docs/testing.md).

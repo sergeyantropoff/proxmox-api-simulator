@@ -78,10 +78,24 @@ def _public_qemu_config(config: dict[str, Any], state: dict[str, Any]) -> dict[s
     agent = config.get("agent", state.get("agent", "0"))
     payload["agent"] = _agent_config_string(agent)
     digest_src = {key: value for key, value in payload.items() if key != "digest"}
-    payload["digest"] = hashlib.sha1(
+    payload["digest"] = hashlib.sha1(  # noqa: S324 - Proxmox config digests use SHA-1
         json.dumps(digest_src, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     return payload
+
+
+def _cpu_utilization(vm_state: Mapping[str, Any], *, running: bool, idle: float = 0.1) -> float:
+    """Status ``cpu`` is utilization; config may store model strings like ``qemu64``."""
+
+    raw = vm_state.get("cpu")
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str):
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return idle if running else 0.0
 
 
 def _qemu_index_item(vmid: int, vm_state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
@@ -96,7 +110,7 @@ def _qemu_index_item(vmid: int, vm_state: dict[str, Any], config: dict[str, Any]
         "status": status,
         "qmpstatus": status if running else "stopped",
         "cpus": int(config.get("cores", config.get("cpus", 1))),
-        "cpu": float(vm_state.get("cpu", 0.1 if running else 0.0)),
+        "cpu": _cpu_utilization(vm_state, running=running),
         "maxmem": maxmem,
         "mem": mem,
         "memhost": int(vm_state.get("memhost", mem)),

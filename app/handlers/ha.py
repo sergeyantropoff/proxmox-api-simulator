@@ -30,7 +30,7 @@ def _ha_groups(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def _ha_digest(payload: dict[str, Any]) -> str:
     material = {key: value for key, value in payload.items() if key != "digest"}
-    return hashlib.sha1(
+    return hashlib.sha1(  # noqa: S324 - Proxmox HA digests use SHA-1
         json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 

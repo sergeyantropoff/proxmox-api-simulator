@@ -5,7 +5,7 @@ x-test-env: &test-env
   API_USER: ${API_USER:-root@pam}
   API_PASSWORD: ${API_PASSWORD:-secret}
   API_TOKEN: ${API_TOKEN:-root@pam!automation=automation-secret}
-  PVE_NODE: ${PVE_NODE:-pve01}
+  PVE_NODE: ${PVE_NODE:-pve1}
   PVE_STORAGE: ${PVE_STORAGE:-local-lvm}
   PVE_BRIDGE: ${PVE_BRIDGE:-vmbr0}
   API_TIMEOUT: ${API_TIMEOUT:-120}

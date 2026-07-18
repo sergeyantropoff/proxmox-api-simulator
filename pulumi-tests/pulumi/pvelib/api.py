@@ -15,7 +15,7 @@ class Pve:
         root = os.environ.get("API_URL", "http://simulator:8006").rstrip("/")
         self.root = root
         self.base = root + "/api2/json"
-        self.node = os.environ.get("PVE_NODE", "pve01")
+        self.node = os.environ.get("PVE_NODE", "pve1")
         self.storage = os.environ.get("PVE_STORAGE", "local-lvm")
         self.bridge = os.environ.get("PVE_BRIDGE", "vmbr0")
         self._c = httpx.Client(base_url=self.base, timeout=120.0)
