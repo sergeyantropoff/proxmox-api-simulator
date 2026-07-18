@@ -43,6 +43,11 @@ def backup_handler(repository: TaskRepository, clock: Clock) -> TaskHandler:
             await repository.append_log(task.id, "apt update finished")
             return {"status": "OK"}
 
+        # Node/cluster ops whose durable side effects were applied by the API handler.
+        if task.task_type != "vzdump":
+            await repository.append_log(task.id, f"{task.task_type} completed")
+            return {"status": "OK"}
+
         node = str(task.payload["node"])
         vmids = [str(item) for item in task.payload.get("vmids", [])]
         storage_id = str(task.payload.get("storage") or "nfs-backup")

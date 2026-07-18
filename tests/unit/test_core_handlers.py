@@ -39,20 +39,33 @@ class FakePool:
 
     async def fetch(self, sql: str, *args: object) -> list[dict[str, object]]:
         del args
+        if "FROM pool_members" in sql or "kind='ha'" in sql:
+            return []
         if "FROM nodes" in sql:
-            return [{"node": "pve1", "status": "online"}]
+            return [{"node": "pve1", "name": "pve1", "status": "online"}]
         if "r.kind='qemu'" in sql:
-            return [{"vmid": 100, "state": '{"name":"demo","status":"stopped"}'}]
-        return [
-            {
-                "type": "qemu",
-                "external_id": "100",
-                "state": '{"status":"stopped"}',
-                "node": "pve1",
-            }
-        ]
+            return [
+                {
+                    "vmid": 100,
+                    "state": '{"name":"demo","status":"stopped"}',
+                    "config": '{"name":"demo","memory":2048,"cores":2}',
+                }
+            ]
+        if "r.kind = ANY" in sql or "r.kind AS type" in sql:
+            return [
+                {
+                    "type": "qemu",
+                    "external_id": "100",
+                    "state": '{"status":"stopped","name":"demo"}',
+                    "node": "pve1",
+                }
+            ]
+        return []
 
-    async def fetchval(self, sql: str) -> int:
+    async def fetchval(self, sql: str, *args: object) -> object:
+        del args
+        if "SELECT name FROM clusters" in sql:
+            return "pve-simulator"
         return 100 if "pg_backend_pid" in sql else 1_700_000_000
 
 
@@ -194,10 +207,13 @@ async def test_core_login_and_read_endpoints(
     assert login.status_code == 200
     assert login.json()["data"]["username"] == "root@pam"
     assert "ticket" in login.json()["data"]
+    assert login.json()["data"]["clustername"] == "pve-simulator"
     assert version.json()["data"]["version"] == "test"
     assert version.json()["data"]["release"] == "test"
     assert nodes.json()["data"][0]["node"] == "pve1"
-    assert status.json()["data"]["status"] == "online"
+    assert "uptime" in status.json()["data"]
+    assert "memory" in status.json()["data"]
+    assert "cpuinfo" in status.json()["data"]
     resource_types = {item["type"] for item in resources.json()["data"]}
     assert "qemu" in resource_types
     qemu_resources = [item for item in resources.json()["data"] if item["type"] == "qemu"]

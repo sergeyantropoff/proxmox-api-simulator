@@ -65,6 +65,8 @@ def _agent_config_string(value: object) -> str:
 def _public_qemu_config(config: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """Wire-format QEMU config for clients (bpg / pulumi-proxmoxve)."""
 
+    import hashlib
+
     merged = {**state, **config}
     payload: dict[str, Any] = {}
     for key, value in merged.items():
@@ -75,19 +77,66 @@ def _public_qemu_config(config: dict[str, Any], state: dict[str, Any]) -> dict[s
         payload[key] = value
     agent = config.get("agent", state.get("agent", "0"))
     payload["agent"] = _agent_config_string(agent)
+    digest_src = {key: value for key, value in payload.items() if key != "digest"}
+    payload["digest"] = hashlib.sha1(
+        json.dumps(digest_src, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     return payload
+
+
+def _qemu_index_item(vmid: int, vm_state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    status = str(vm_state.get("status", "stopped"))
+    running = status in {"running", "paused"}
+    memory_mb = int(config.get("memory", config.get("mem", 2048)))
+    maxmem = memory_mb * 2**20
+    mem = int(vm_state.get("mem", maxmem // 2 if running else 0))
+    return {
+        "vmid": vmid,
+        "name": str(config.get("name", f"vm-{vmid}")),
+        "status": status,
+        "qmpstatus": status if running else "stopped",
+        "cpus": int(config.get("cores", config.get("cpus", 1))),
+        "cpu": float(vm_state.get("cpu", 0.1 if running else 0.0)),
+        "maxmem": maxmem,
+        "mem": mem,
+        "memhost": int(vm_state.get("memhost", mem)),
+        "maxdisk": int(vm_state.get("maxdisk", config.get("maxdisk", 32 * 1024**3))),
+        "disk": int(vm_state.get("disk", 0)),
+        "diskread": int(vm_state.get("diskread", 0)),
+        "diskwrite": int(vm_state.get("diskwrite", 0)),
+        "netin": int(vm_state.get("netin", 0)),
+        "netout": int(vm_state.get("netout", 0)),
+        "uptime": int(vm_state.get("uptime", 0)) if running else 0,
+        "pid": int(vm_state.get("pid", 12_345 if running else 0)),
+        "lock": str(vm_state.get("lock", "")),
+        "tags": str(config.get("tags", "")),
+        "template": int(bool(vm_state.get("template", False))),
+        "running-qemu": str(vm_state.get("running-qemu", "9.2.0")) if running else "",
+        "running-machine": str(vm_state.get("running-machine", "pc-i440fx-9.2")) if running else "",
+        "pressurecpusome": float(vm_state.get("pressurecpusome", 0.0)),
+        "pressurecpufull": float(vm_state.get("pressurecpufull", 0.0)),
+        "pressureiosome": float(vm_state.get("pressureiosome", 0.0)),
+        "pressureiofull": float(vm_state.get("pressureiofull", 0.0)),
+        "pressurememorysome": float(vm_state.get("pressurememorysome", 0.0)),
+        "pressurememoryfull": float(vm_state.get("pressurememoryfull", 0.0)),
+    }
 
 
 def register_qemu_handlers(registry: HandlerRegistry) -> None:
     async def qemu_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         node = str(_values(inputs)["node"])
         rows = await _database(request).pool.fetch(
-            """SELECT r.external_id::integer AS vmid, r.state
-            FROM resources r JOIN nodes n ON n.id=r.node_id
+            """SELECT r.external_id::integer AS vmid, r.state, v.config
+            FROM resources r
+            JOIN nodes n ON n.id=r.node_id
+            JOIN virtual_machines v ON v.resource_id=r.id
             WHERE n.name=$1 AND r.kind='qemu' ORDER BY r.external_id::integer""",
             node,
         )
-        return [{"vmid": int(row["vmid"]), **_state(row["state"])} for row in rows]
+        return [
+            _qemu_index_item(int(row["vmid"]), _state(row["state"]), _state(row["config"]))
+            for row in rows
+        ]
 
     async def qemu_status_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
         payload = _values(inputs)
@@ -127,28 +176,28 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
                 else 0,
             )
         )
-        return {
-            "vmid": vmid,
-            "name": str(config.get("name", f"vm-{vmid}")),
-            "status": status,
-            "qmpstatus": status if running else "stopped",
-            "lock": str(vm_state.get("lock", "")),
-            "pid": int(vm_state.get("pid", 12_345 if running else 0)),
-            "cpus": int(config.get("cores", config.get("cpus", 1))),
-            "maxmem": maxmem,
-            "mem": mem_used,
-            "balloon": int(vm_state.get("balloon", 0)),
-            "ballooninfo": {
-                "actual": mem_used,
-                "max_mem": maxmem,
-                "mem_swapped_in": 0,
-                "mem_swapped_out": 0,
-            },
-            "uptime": uptime,
-            "template": int(bool(vm_state.get("template", False))),
-            "ha": {"managed": int(vm_state.get("ha_managed", 0))},
-            "agent": 1 if running and str(config.get("agent", "0")).startswith("1") else 0,
-        }
+        agent_enabled = str(config.get("agent", "0")).startswith("1")
+        item = _qemu_index_item(vmid, vm_state, config)
+        item.update(
+            {
+                "uptime": uptime,
+                "mem": mem_used,
+                "balloon": int(vm_state.get("balloon", 0)),
+                "ballooninfo": {
+                    "actual": mem_used,
+                    "max_mem": maxmem,
+                    "mem_swapped_in": 0,
+                    "mem_swapped_out": 0,
+                },
+                "template": bool(vm_state.get("template", False)),
+                "ha": {"managed": int(vm_state.get("ha_managed", 0))},
+                "agent": bool(running and agent_enabled),
+                "clipboard": str(vm_state.get("clipboard", "")),
+                "spice": bool(vm_state.get("spice", False)),
+                "serial": bool(vm_state.get("serial", False)),
+            }
+        )
+        return item
 
     async def qemu_config(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         node, vmid = str(_values(inputs)["node"]), str(_values(inputs)["vmid"])
@@ -339,24 +388,30 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
         values = _values(inputs)
         resource = await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
         rows = await _database(request).pool.fetch(
-            """SELECT name, parent_name, description, created_at FROM snapshots
+            """SELECT name, parent_name, description, created_at, state FROM snapshots
             WHERE resource_id=$1 ORDER BY created_at, name""",
             resource["id"],
         )
-        return [
-            {
-                "name": row["name"],
-                "parent": row["parent_name"],
-                "description": row["description"] or "",
-                "snaptime": int(row["created_at"].timestamp()),
-            }
-            for row in rows
-        ]
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            raw_state = row["state"] if "state" in row else None
+            snap_state = _state(raw_state) if raw_state is not None else {}
+            result.append(
+                {
+                    "name": row["name"],
+                    "parent": row["parent_name"],
+                    "description": row["description"] or "",
+                    "snaptime": int(row["created_at"].timestamp()),
+                    "vmstate": int(bool(snap_state.get("vmstate"))),
+                }
+            )
+        return result
 
     async def snapshot_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         values = _values(inputs)
         row = await _snapshot(request, values)
-        state = _state(row["state"])
+        raw_state = row["state"] if "state" in row else None
+        state = _state(raw_state) if raw_state is not None else {}
         return {
             "name": row["name"],
             "parent": row["parent_name"],
@@ -528,7 +583,7 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
             },
         )
 
-    async def resize(request: Request, inputs: dict[str, Any]) -> None:
+    async def resize(request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)
         node, vmid, disk = str(values["node"]), str(values["vmid"]), str(values["disk"])
         resource = await _qemu_resource(request, node, vmid)
@@ -560,6 +615,13 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
             disk,
             str(config[disk]).split(":", 1)[0],
             size,
+        )
+        return await _create_task(
+            request,
+            node=node,
+            vmid=vmid,
+            task_type="qemu-resize",
+            payload={"resource_id": str(resource["id"]), "disk": disk, "size": size},
         )
 
     async def move_disk(request: Request, inputs: dict[str, Any]) -> str:
@@ -635,12 +697,32 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
         return await agent_result("ping", request, inputs)
 
     async def task_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        tasks = await TaskRepository(_database(request).pool).list_for_node(
-            str(_values(inputs)["node"])
-        )
-        return [
-            {"upid": task.upid, "status": task.status, "type": task.task_type} for task in tasks
-        ]
+        from app.tasks.upid import Upid
+
+        node = str(_values(inputs)["node"])
+        tasks = await TaskRepository(_database(request).pool).list_for_node(node)
+        result: list[dict[str, Any]] = []
+        for task in tasks:
+            try:
+                parsed = Upid.parse(task.upid)
+            except ValueError:
+                continue
+            finished = task.status in {"success", "error", "cancelled"}
+            entry: dict[str, Any] = {
+                "upid": task.upid,
+                "id": parsed.task_id,
+                "node": parsed.node,
+                "pid": parsed.pid,
+                "pstart": parsed.process_start,
+                "starttime": parsed.start_time,
+                "type": parsed.task_type,
+                "user": parsed.user,
+            }
+            if finished:
+                entry["status"] = "OK" if task.status == "success" else str(task.status).upper()
+                entry["endtime"] = parsed.start_time + max(task.progress, 1)
+            result.append(entry)
+        return result
 
     async def task_status(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         task = await TaskRepository(_database(request).pool).get_by_upid(
@@ -681,7 +763,7 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
             }
         }
 
-    async def qemu_template(request: Request, inputs: dict[str, Any]) -> None:
+    async def qemu_template(request: Request, inputs: dict[str, Any]) -> str:
         payload = _values(inputs)
         node, vmid = str(payload["node"]), str(payload["vmid"])
         resource = await _qemu_resource(request, node, vmid)
@@ -697,6 +779,13 @@ def register_qemu_handlers(registry: HandlerRegistry) -> None:
             "UPDATE resources SET state=$2::jsonb WHERE id=$1",
             resource["id"],
             json.dumps(state, sort_keys=True),
+        )
+        return await _create_task(
+            request,
+            node=node,
+            vmid=vmid,
+            task_type="qemu-template",
+            payload={"resource_id": str(resource["id"])},
         )
 
     async def qemu_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
@@ -815,6 +904,8 @@ async def _create_task(
         "qemu-migrate": "qmigrate",
         "qemu-remote-migrate": "qmremote",
         "qemu-move-disk": "qmmove",
+        "qemu-resize": "qmresize",
+        "qemu-template": "qmtemplate",
     }[task_type]
     upid = str(Upid.allocate(node, worker_type, vmid, str(request.state.principal)))
     try:

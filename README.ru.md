@@ -113,9 +113,9 @@ curl -sS -X POST -d 'username=root@pam&password=secret' \
 горячей сменой runtime-контракта и монитором задач UPID. Подробнее:
 [Web UI](docs/ru/web-ui.md).
 
-![Web UI, светлая тема](docs/images/web-ui-light.png)
+![Web UI, главный экран](docs/images/web-ui-main.png)
 
-![Web UI, тёмная тема](docs/images/web-ui-dark.png)
+![Web UI, каталог API](docs/images/web-ui-api-catalog.png)
 
 ## Документация
 

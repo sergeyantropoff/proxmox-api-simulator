@@ -5,21 +5,23 @@ from typing import Any, cast
 import pytest
 
 from app.simulation.seed import (
+    big_profile,
     build_profile,
     clear_simulation_state,
     cluster_domain_metadata,
     default_node_ops_for_seed,
     enrich_guest_state,
     enrich_storage_state,
+    lab_profile,
     large_profile,
     small_profile,
     stable_id,
 )
 
 
-def test_small_profile_matches_required_logical_shape() -> None:
-    first = small_profile()
-    second = small_profile()
+def test_lab_profile_matches_required_logical_shape() -> None:
+    first = lab_profile()
+    second = lab_profile()
 
     assert first == second
     state = first.logical_state()
@@ -29,17 +31,54 @@ def test_small_profile_matches_required_logical_shape() -> None:
     assert isinstance(resources, list)
     assert [resource["kind"] for resource in resources].count("qemu") == 2
     assert [resource["kind"] for resource in resources].count("lxc") == 1
-    assert [resource["kind"] for resource in resources].count("storage") == 2
+    assert [resource["kind"] for resource in resources].count("storage") == 3
+    assert [resource["kind"] for resource in resources].count("ceph-osd") == 3
+    assert [resource["kind"] for resource in resources].count("ha") == 1
     tasks = state["tasks"]
     assert isinstance(tasks, list)
     assert len(tasks) == 2
 
 
+def test_sized_cluster_profiles() -> None:
+    small = small_profile()
+    assert len(small.nodes) == 3
+    assert sum(resource.kind in {"qemu", "lxc"} for resource in small.resources) == 50
+    assert sum(resource.kind == "ceph-osd" for resource in small.resources) == 10
+    assert sum(resource.kind == "ha" for resource in small.resources) == 3
+    assert len(small.tasks) == 12
+
+    large = large_profile()
+    assert len(large.nodes) == 10
+    assert sum(resource.kind in {"qemu", "lxc"} for resource in large.resources) == 1_000
+    assert sum(resource.kind == "ceph-osd" for resource in large.resources) == 100
+    assert sum(resource.kind == "pool" for resource in large.resources) == 2
+    assert len(large.tasks) == 50
+
+    big = big_profile()
+    assert len(big.nodes) == 20
+    assert sum(resource.kind in {"qemu", "lxc"} for resource in big.resources) == 2_000
+    assert sum(resource.kind == "ceph-osd" for resource in big.resources) == 500
+    assert sum(resource.kind == "pool" for resource in big.resources) == 3
+    assert len(big.tasks) == 100
+    assert build_profile("big") == big
+
+
+def test_sized_profiles_spread_osds_across_nodes() -> None:
+    for profile_name, expected in (("small", 10), ("large", 100), ("big", 500)):
+        profile = build_profile(profile_name)
+        names = {node.id: node.name for node in profile.nodes}
+        counts: dict[str, int] = {name: 0 for name in names.values()}
+        for resource in profile.resources:
+            if resource.kind == "ceph-osd":
+                counts[names[resource.node_id]] += 1
+        assert sum(counts.values()) == expected
+        assert max(counts.values()) - min(counts.values()) <= 1
+
+
 def test_medium_and_fault_profiles_are_deterministic() -> None:
     medium = build_profile("medium")
     assert len(medium.nodes) == 3
-    assert sum(resource.kind == "qemu" for resource in medium.resources) == 50
-    assert sum(resource.kind == "lxc" for resource in medium.resources) == 20
+    assert sum(resource.kind in {"qemu", "lxc"} for resource in medium.resources) == 50
     assert build_profile("ha-demo") == build_profile("ha-demo")
     broken = build_profile("broken-storage")
     assert any(resource.state.get("status") == "offline" for resource in broken.resources)
@@ -50,7 +89,10 @@ def test_large_profile_is_configurable_and_stable() -> None:
     second = large_profile(node_count=4, resource_count=1_000)
     assert first == second
     assert len(first.nodes) == 4
-    assert len(first.resources) == 1_000
+    guests = [r for r in first.resources if r.kind in {"qemu", "lxc"}]
+    assert len(guests) == 1_000
+    assert any(r.kind == "storage" and r.external_id == "local" for r in first.resources)
+    assert any(r.kind == "ceph-osd" for r in first.resources)
 
 
 def test_profile_validation() -> None:
@@ -108,7 +150,7 @@ def test_stable_ids_are_namespaced_and_repeatable() -> None:
 
 
 def test_cluster_domain_metadata_seeds_list_domains() -> None:
-    meta = cast(dict[str, Any], cluster_domain_metadata(small_profile()))
+    meta = cast(dict[str, Any], cluster_domain_metadata(lab_profile()))
     assert meta["firewall"]["scopes"]["cluster"]["rules"]
     assert meta["firewall"]["scopes"]["cluster"]["aliases"]
     assert meta["firewall"]["scopes"]["cluster"]["ipset"]
@@ -127,23 +169,36 @@ def test_cluster_domain_metadata_seeds_list_domains() -> None:
     assert meta["notifications"]["matchers"]
     assert meta["notifications"]["matcher_fields"]
     assert meta["acme"]["accounts"]
+    assert meta["acme"]["accounts"]["letsencrypt"]["tos_url"]
     assert meta["acme"]["plugins"]
     assert meta["acme"]["directories"]
     assert meta["acme"]["challenge_schema"]
     assert meta["mapping"]["pci"]
     assert meta["mapping"]["usb"]
     assert meta["mapping"]["dir"]
-    assert meta["replication"]
+    # Single-node lab must not invent ghost peers.
+    assert meta["replication"] == []
+    assert "pve02" not in str(meta["sdn"]["controllers"])
     assert meta["metrics"]["servers"]
     assert meta["ha_groups"]
     assert meta["ceph"]["pools"]
     assert meta["ceph"]["flags"]
+    assert "noup" in meta["ceph"]["flags"]
+    assert meta["ceph"]["flags"]["nobackfill"] == 0
+    assert meta["ceph"]["health"]["status"] == "HEALTH_OK"
     assert meta["ceph"]["version"]
+    assert len([r for r in lab_profile().resources if r.kind == "ceph-osd"]) == 3
+    assert any(r.kind == "storage" and r.external_id == "ceph" for r in lab_profile().resources)
+    local = next(r for r in lab_profile().resources if r.external_id == "local")
+    assert int(cast(int, local.state["total_bytes"])) > 0
+    assert lab_profile().tasks[0].payload["node"] == "pve01"
     assert meta["qemu_cpu_flags"]
     assert meta["metrics"]["export_data"]
     assert meta["jobs"]["schedule_analyze_results"]
-    assert meta["replication"][0]["log"]
     ops = cast(dict[str, Any], default_node_ops_for_seed("pve01"))
+    assert ops["vzdump"]["defaults"]["storage"] == "local"
+    assert ops["status"]["mem"] > 0
+    assert ops["status"]["maxmem"] > 0
     assert ops["capabilities"]["cpu"]
     assert ops["capabilities"]["machines"]
     assert ops["hosts"]["data"]
@@ -154,11 +209,21 @@ def test_cluster_domain_metadata_seeds_list_domains() -> None:
     assert ops["status"]["uptime"]
     assert ops["ip"]
     assert meta["cluster_config"]["totem"]
+    assert meta["cluster_config"]["config_digest"]
+    assert meta["cluster_config"]["corosync_conf"]
+    assert meta["cluster_config"]["corosync_authkey"]
+    first_node = next(iter(meta["cluster_config"]["added_nodes"].values()))
+    assert first_node["pve_fp"].count(":") == 31
+    assert first_node["pve_addr"]
+    assert meta["backup_jobs"]["backup-daily"]["storage"] == "local"
     assert meta["quorate"] == 1
     guest = cast(
         dict[str, Any],
         enrich_guest_state({"name": "demo", "status": "stopped"}, kind="qemu", vmid="100"),
     )
+    assert guest["scsi0"].startswith("local-lvm:")
+    assert guest["ostype"] == "l26"
+    assert str(guest["net0"]).startswith("virtio=")
     assert guest["agent"]["results"]["info"]
     assert guest["rrddata"]
     assert guest["migrate_preconditions"]
@@ -169,6 +234,36 @@ def test_cluster_domain_metadata_seeds_list_domains() -> None:
     assert storage["rrddata"]
     assert storage["file_restore"]
     assert storage["import_metadata"]
+
+    small_meta = cast(dict[str, Any], cluster_domain_metadata(small_profile()))
+    assert len(small_meta["replication"]) == 2
+    assert small_meta["replication"][0]["guest"] == 101
+    assert len(small_meta["backup_jobs"]) == 2
+    assert len(small_meta["ha_groups"]) == 2
+    assert small_meta["sdn"]["zones"]["public"]["digest"]
+    assert small_meta["sdn"]["zones"]["public"]["state"] == "available"
+    assert len(cast(dict[str, Any], cluster_domain_metadata(large_profile()))["replication"]) == 8
+    assert len(cast(dict[str, Any], cluster_domain_metadata(large_profile()))["ha_groups"]) == 4
+    assert len(cast(dict[str, Any], cluster_domain_metadata(big_profile()))["replication"]) == 16
+    assert len(cast(dict[str, Any], cluster_domain_metadata(big_profile()))["ha_groups"]) == 6
+    assert len(cast(dict[str, Any], cluster_domain_metadata(big_profile()))["ceph"]["pools"]) == 3
+
+    ops = cast(dict[str, Any], default_node_ops_for_seed("pve1", node_index=1, node_count=3))
+    apt_repos = cast(dict[str, Any], cast(dict[str, Any], ops["apt"])["repositories"])
+    assert "files" in apt_repos and "standard-repos" in apt_repos
+    cert = cast(list[dict[str, Any]], cast(dict[str, Any], ops["certificates"])["info"])[0]
+    assert cert["pem"] and cert["san"] and cert["public-key-bits"] == 4096
+
+
+def test_sized_profile_artifact_targets() -> None:
+    from app.simulation.seed import _CLUSTER_SIZE_SPECS
+
+    assert _CLUSTER_SIZE_SPECS["small"]["backups"] == 10
+    assert _CLUSTER_SIZE_SPECS["small"]["snapshots"] == 12
+    assert _CLUSTER_SIZE_SPECS["large"]["backups"] == 80
+    assert _CLUSTER_SIZE_SPECS["large"]["snapshots"] == 100
+    assert _CLUSTER_SIZE_SPECS["big"]["backups"] == 160
+    assert _CLUSTER_SIZE_SPECS["big"]["snapshots"] == 200
 
 
 @pytest.mark.asyncio

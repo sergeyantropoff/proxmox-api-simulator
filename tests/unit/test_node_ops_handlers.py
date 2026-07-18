@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
+import pytest
 from fastapi import FastAPI, Request
 
 from app.api.registry import HandlerRegistry
@@ -17,13 +18,17 @@ class NodePool:
         self.metadata: dict[str, Any] = {}
 
     async def fetchrow(self, query: str, *arguments: object) -> dict[str, Any] | None:
+        del arguments
         if "SELECT metadata FROM nodes" in query:
             return {"metadata": json.dumps(self.metadata)}
         raise AssertionError(query)
 
     async def fetchval(self, query: str, *arguments: object) -> Any:
+        del arguments
         if "EXISTS(SELECT 1 FROM nodes" in query:
             return True
+        if "SELECT name FROM nodes ORDER BY name LIMIT 1" in query:
+            return "pve01"
         raise AssertionError(query)
 
     async def execute(self, query: str, *arguments: object) -> str:
@@ -31,6 +36,16 @@ class NodePool:
             self.metadata = json.loads(str(arguments[1]))
             return "UPDATE 1"
         raise AssertionError(query)
+
+
+class FakeTaskRepository:
+    def __init__(self, pool: NodePool) -> None:
+        self.pool = pool
+        self.created: list[dict[str, Any]] = []
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.created.append(kwargs)
+        return type("Task", (), {"upid": kwargs["upid"]})()
 
 
 class FakeDatabase:
@@ -58,17 +73,29 @@ def request(pool: NodePool, *, method: str = "GET", path: str = "/") -> Request:
     return result
 
 
-async def test_network_and_service_mutations_persist() -> None:
+@pytest.fixture
+def task_repo(monkeypatch: pytest.MonkeyPatch) -> FakeTaskRepository:
+    repository = FakeTaskRepository(NodePool())
+    monkeypatch.setattr("app.handlers.nodes.TaskRepository", lambda _pool: repository)
+    return repository
+
+
+async def test_network_and_service_mutations_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     registry = HandlerRegistry()
     register_node_ops_handlers(registry)
     pool = NodePool()
+    repository = FakeTaskRepository(pool)
+    monkeypatch.setattr("app.handlers.nodes.TaskRepository", lambda _pool: repository)
 
     create = registry.get("/nodes/{node}/network", "POST")
     listing = registry.get("/nodes/{node}/network", "GET")
     delete = registry.get("/nodes/{node}/network/{iface}", "DELETE")
+    reload_network = registry.get("/nodes/{node}/network", "PUT")
     stop = registry.get("/nodes/{node}/services/{service}/stop", "POST")
     state = registry.get("/nodes/{node}/services/{service}/state", "GET")
-    assert create and listing and delete and stop and state
+    assert create and listing and delete and reload_network and stop and state
 
     await create(
         request(pool, method="POST", path="/api2/json/nodes/pve01/network"),
@@ -90,10 +117,17 @@ async def test_network_and_service_mutations_persist() -> None:
     )
     assert all(item["iface"] != "vmbr9" for item in items)
 
-    await stop(
+    reload_upid = await reload_network(
+        request(pool, method="PUT", path="/api2/json/nodes/pve01/network"),
+        {"values": {"node": "pve01"}, "provided": frozenset()},
+    )
+    assert isinstance(reload_upid, str) and reload_upid.startswith("UPID:")
+
+    stop_upid = await stop(
         request(pool, method="POST", path="/api2/json/nodes/pve01/services/pveproxy/stop"),
         {"values": {"node": "pve01", "service": "pveproxy"}, "provided": frozenset()},
     )
+    assert isinstance(stop_upid, str) and stop_upid.startswith("UPID:")
     service = await state(
         request(pool),
         {"values": {"node": "pve01", "service": "pveproxy"}, "provided": frozenset()},
@@ -102,23 +136,27 @@ async def test_network_and_service_mutations_persist() -> None:
     assert "ops" in pool.metadata
 
 
-async def test_disk_init_and_wipe_persist() -> None:
+async def test_disk_init_and_wipe_persist(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = HandlerRegistry()
     register_node_ops_handlers(registry)
     pool = NodePool()
+    repository = FakeTaskRepository(pool)
+    monkeypatch.setattr("app.handlers.nodes.TaskRepository", lambda _pool: repository)
     initgpt = registry.get("/nodes/{node}/disks/initgpt", "POST")
     wipe = registry.get("/nodes/{node}/disks/wipedisk", "PUT")
     listing = registry.get("/nodes/{node}/disks/list", "GET")
     assert initgpt and wipe and listing
 
-    await initgpt(
+    init_upid = await initgpt(
         request(pool, method="POST"),
         {"values": {"node": "pve01", "disk": "/dev/sdb"}, "provided": frozenset()},
     )
-    await wipe(
+    wipe_upid = await wipe(
         request(pool, method="PUT"),
         {"values": {"node": "pve01", "disk": "/dev/sdb"}, "provided": frozenset()},
     )
+    assert init_upid.startswith("UPID:")
+    assert wipe_upid.startswith("UPID:")
     disks = await listing(
         request(pool),
         {"values": {"node": "pve01"}, "provided": frozenset()},

@@ -108,7 +108,9 @@ async def _migrate_guests(request: Request, node: str, target: str) -> None:
 
 
 def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
-    async def disks_create(request: Request, inputs: dict[str, Any], kind: str) -> dict[str, Any]:
+    async def disks_create(request: Request, inputs: dict[str, Any], kind: str) -> str:
+        from app.handlers.nodes import _node_task
+
         payload = values(inputs)
         node = str(payload["node"])
         await require_node(request, node)
@@ -134,9 +136,13 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
             ops["disks"] = disks
         disks[kind] = items
         await save_node_ops(request, node, ops)
-        return entry
+        return await _node_task(
+            request, node=node, task_type=f"disk-{kind}-create", worker=f"disk{kind}"
+        )
 
-    async def disks_delete(request: Request, inputs: dict[str, Any], kind: str) -> None:
+    async def disks_delete(request: Request, inputs: dict[str, Any], kind: str) -> str:
+        from app.handlers.nodes import _node_task
+
         payload = values(inputs)
         node = str(payload["node"])
         name = str(payload["name"])
@@ -148,6 +154,9 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
             raise ApiError(404, f"{kind} does not exist")
         ops.setdefault("disks", {})[kind] = remaining
         await save_node_ops(request, node, ops)
+        return await _node_task(
+            request, node=node, task_type=f"disk-{kind}-delete", worker=f"diskdel{kind}"
+        )
 
     async def disks_zfs_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         payload = values(inputs)
@@ -194,11 +203,11 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         certs["acme"] = acme
         ops["certificates"] = certs
         await save_node_ops(request, node, ops)
-        if method == "DELETE":
-            return None
         return await _node_task(request, node=node, task_type="acme", worker="acme")
 
-    async def certificates_custom(request: Request, inputs: dict[str, Any]) -> None:
+    async def certificates_custom(
+        request: Request, inputs: dict[str, Any]
+    ) -> dict[str, Any] | None:
         payload = values(inputs)
         node = str(payload["node"])
         await require_node(request, node)
@@ -206,35 +215,40 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         certs = _certificates(ops)
         if request.method.upper() == "DELETE":
             certs["custom"] = None
-        else:
-            certificates = str(payload.get("certificates") or payload.get("cert") or "")
-            if not certificates:
-                raise ApiError(400, "parameter verification failed - 'certificates' missing")
-            key = str(payload.get("key") or payload.get("private-key") or "")
-            certs["custom"] = {
-                "certificates": certificates,
-                "key": key,
-                "restart": int(payload.get("restart") or 0),
-                "filename": str(payload.get("filename") or "pveproxy-ssl.pem"),
-            }
-            info = list(certs.get("info") or [])
-            info = [item for item in info if item.get("filename") != certs["custom"]["filename"]]
-            info.append(
-                {
-                    "filename": certs["custom"]["filename"],
-                    "fingerprint": secrets.token_hex(20),
-                    "issuer": "CN=Simulator",
-                    "subject": "CN=pve.local",
-                    "notbefore": int(time.time()) - 86_400,
-                    "notafter": int(time.time()) + 365 * 86_400,
-                    "san": ["DNS:pve.local"],
-                    "public-key-type": "rsa",
-                    "public-key-bits": 2048,
-                }
-            )
-            certs["info"] = info
+            ops["certificates"] = certs
+            await save_node_ops(request, node, ops)
+            return None
+        certificates = str(payload.get("certificates") or payload.get("cert") or "")
+        if not certificates:
+            raise ApiError(400, "parameter verification failed - 'certificates' missing")
+        key = str(payload.get("key") or payload.get("private-key") or "")
+        filename = str(payload.get("filename") or "pveproxy-ssl.pem")
+        fingerprint = ":".join(secrets.token_hex(1) for _ in range(32))  # SHA-256 fingerprint style
+        summary = {
+            "filename": filename,
+            "fingerprint": fingerprint,
+            "issuer": "CN=Simulator",
+            "subject": "CN=pve.local",
+            "notbefore": int(time.time()) - 86_400,
+            "notafter": int(time.time()) + 365 * 86_400,
+            "san": ["DNS:pve.local"],
+            "public-key-type": "rsa",
+            "public-key-bits": 2048,
+            "pem": certificates,
+        }
+        certs["custom"] = {
+            "certificates": certificates,
+            "key": key,
+            "restart": int(payload.get("restart") or 0),
+            "filename": filename,
+        }
+        info = list(certs.get("info") or [])
+        info = [item for item in info if item.get("filename") != filename]
+        info.append({key: value for key, value in summary.items() if key != "pem"})
+        certs["info"] = info
         ops["certificates"] = certs
         await save_node_ops(request, node, ops)
+        return summary
 
     async def certificates_info(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         node = str(values(inputs)["node"])
@@ -257,7 +271,39 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
             certs["info"] = info
             ops["certificates"] = certs
             await save_node_ops(request, node, ops)
-        return [dict(item) for item in info]
+        if not info:
+            from app.simulation.seed import _seed_fingerprint
+
+            info = [
+                {
+                    "filename": "pve-ssl.pem",
+                    "fingerprint": _seed_fingerprint(node),
+                    "issuer": f"CN={node}.proxmox.local",
+                    "subject": f"CN={node}.proxmox.local",
+                    "notbefore": 1_700_000_000,
+                    "notafter": 2_000_000_000,
+                    "pem": (
+                        "-----BEGIN CERTIFICATE-----\n"
+                        "SIMULATOR-SEED-CERT\n"
+                        "-----END CERTIFICATE-----\n"
+                    ),
+                    "san": [f"{node}.proxmox.local"],
+                    "public-key-type": "rsa",
+                    "public-key-bits": 4096,
+                }
+            ]
+            certs["info"] = info
+            ops["certificates"] = certs
+            await save_node_ops(request, node, ops)
+        result: list[dict[str, Any]] = []
+        for item in info:
+            entry = dict(item)
+            entry.setdefault("pem", "-----BEGIN CERTIFICATE-----\nSIM\n-----END CERTIFICATE-----\n")
+            entry.setdefault("san", [str(entry.get("subject", "CN=pve.local")).removeprefix("CN=")])
+            entry.setdefault("public-key-type", "rsa")
+            entry.setdefault("public-key-bits", 4096)
+            result.append(entry)
+        return result
 
     async def scan_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
         await require_node(request, str(values(inputs)["node"]))
@@ -437,44 +483,136 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         if not isinstance(apt, dict):
             apt = {}
             ops["apt"] = apt
-        repositories = list(apt.get("repositories") or [])
+        envelope = apt.get("repositories")
+        if isinstance(envelope, dict) and "files" in envelope:
+            files = [
+                dict(item) for item in list(envelope.get("files") or []) if isinstance(item, dict)
+            ]
+            standard = [
+                dict(item)
+                for item in list(envelope.get("standard-repos") or [])
+                if isinstance(item, dict)
+            ]
+        else:
+            legacy = list(envelope) if isinstance(envelope, list) else []
+            files = [
+                {
+                    "path": "/etc/apt/sources.list.d/pve-enterprise.list",
+                    "file-type": "list",
+                    "digest": "seedapt-file0",
+                    "repositories": legacy,
+                }
+            ]
+            standard = []
         method = request.method.upper()
-        if method == "POST":
-            entry = {
+        handle = payload.get("handle")
+        if handle is not None:
+            updated_standard: list[dict[str, Any]] = []
+            found = False
+            for item in standard:
+                if item.get("handle") == handle:
+                    found = True
+                    merged = dict(item)
+                    if "enabled" in payload:
+                        merged["status"] = int(bool(payload.get("enabled")))
+                    updated_standard.append(merged)
+                else:
+                    updated_standard.append(item)
+            if not found:
+                updated_standard.append(
+                    {
+                        "handle": str(handle),
+                        "name": str(payload.get("name") or handle),
+                        "status": int(bool(payload.get("enabled", 1))),
+                    }
+                )
+            standard = updated_standard
+        elif method == "POST":
+            repo_entry = {
                 key: value
                 for key, value in payload.items()
-                if key not in {"node", "delete", "digest"}
+                if key not in {"node", "delete", "digest", "path", "handle", "index", "file-type"}
             }
-            entry.setdefault("path", f"/etc/apt/sources.list.d/sim-{secrets.token_hex(2)}.list")
-            entry.setdefault("enabled", 1)
-            repositories.append(entry)
+            path = str(
+                payload.get("path") or f"/etc/apt/sources.list.d/sim-{secrets.token_hex(2)}.list"
+            )
+            matched = False
+            for file_entry in files:
+                if file_entry.get("path") == path:
+                    repos = list(file_entry.get("repositories") or [])
+                    repos.append(repo_entry)
+                    file_entry["repositories"] = repos
+                    matched = True
+                    break
+            if not matched:
+                files.append(
+                    {
+                        "path": path,
+                        "file-type": str(payload.get("file-type") or "list"),
+                        "digest": secrets.token_hex(4),
+                        "repositories": [repo_entry],
+                    }
+                )
         else:
             path = payload.get("path")
-            handle = payload.get("handle")
             index = payload.get("index")
-            updated: list[dict[str, Any]] = []
-            for idx, item in enumerate(repositories):
-                match = False
-                if path is not None and item.get("path") == path:
-                    match = True
-                if handle is not None and item.get("handle") == handle:
-                    match = True
-                if index is not None and idx == int(index):
-                    match = True
-                if match or (path is None and handle is None and index is None and idx == 0):
-                    merged = {
-                        **item,
-                        **{
-                            key: value
-                            for key, value in payload.items()
-                            if key not in {"node", "delete", "digest", "path", "handle", "index"}
-                        },
-                    }
-                    updated.append(merged)
-                else:
-                    updated.append(item)
-            repositories = updated
-        apt["repositories"] = repositories
+            for file_idx, file_entry in enumerate(files):
+                if path is not None and file_entry.get("path") != path:
+                    continue
+                repos = [
+                    dict(item)
+                    for item in list(file_entry.get("repositories") or [])
+                    if isinstance(item, dict)
+                ]
+                if index is not None:
+                    idx = int(index)
+                    if 0 <= idx < len(repos):
+                        repos[idx] = {
+                            **repos[idx],
+                            **{
+                                key: value
+                                for key, value in payload.items()
+                                if key
+                                not in {
+                                    "node",
+                                    "delete",
+                                    "digest",
+                                    "path",
+                                    "handle",
+                                    "index",
+                                    "file-type",
+                                }
+                            },
+                        }
+                elif path is not None or file_idx == 0:
+                    if repos:
+                        repos[0] = {
+                            **repos[0],
+                            **{
+                                key: value
+                                for key, value in payload.items()
+                                if key
+                                not in {
+                                    "node",
+                                    "delete",
+                                    "digest",
+                                    "path",
+                                    "handle",
+                                    "index",
+                                    "file-type",
+                                }
+                            },
+                        }
+                file_entry["repositories"] = repos
+                if path is not None:
+                    break
+        apt["repositories"] = {
+            "digest": secrets.token_hex(4),
+            "errors": [],
+            "infos": [],
+            "standard-repos": standard,
+            "files": files,
+        }
         ops["apt"] = apt
         await save_node_ops(request, node, ops)
 

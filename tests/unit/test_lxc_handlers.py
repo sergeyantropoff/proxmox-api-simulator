@@ -37,7 +37,13 @@ class LxcPool:
     async def fetch(self, sql: str, *args: object) -> list[dict[str, object]]:
         del args
         if "FROM resources" in sql and "kind='lxc'" in sql:
-            return [{"vmid": 200, "state": '{"status":"stopped","name":"service"}'}]
+            return [
+                {
+                    "vmid": 200,
+                    "state": '{"status":"stopped","name":"service"}',
+                    "config": '{"hostname":"service","memory":512,"cores":1}',
+                }
+            ]
         assert "FROM snapshots" in sql
         return [
             {
@@ -118,7 +124,12 @@ async def test_lxc_list_returns_seeded_containers(registry: HandlerRegistry) -> 
     handler = registry.get("/nodes/{node}/lxc", "GET")
     assert handler is not None
     result = await handler(_request(pool), {"values": {"node": "pve1"}})
-    assert result == [{"vmid": 200, "status": "stopped", "name": "service"}]
+    assert len(result) == 1
+    assert result[0]["vmid"] == 200
+    assert result[0]["status"] == "stopped"
+    assert result[0]["name"] == "service"
+    assert result[0]["cpus"] == 1
+    assert "maxmem" in result[0]
 
 
 async def test_lxc_create_rejects_duplicate_vmid(registry: HandlerRegistry) -> None:

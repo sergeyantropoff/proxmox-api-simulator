@@ -32,7 +32,6 @@ class GapPool:
         self.groups = {"operators": {"comment": "ops", "users": ["root@pam"]}}
 
     async def fetch(self, sql: str, *args: object) -> list[dict[str, object]]:
-        del args
         if "FROM nodes" in sql and "ORDER BY name" in sql:
             return [{"id": uuid.uuid4(), "name": "pve01", "status": "online"}]
         if "FROM tasks" in sql:
@@ -64,6 +63,17 @@ class GapPool:
                 }
                 for group_id, data in self.groups.items()
             ]
+        if "FROM identity_group_members" in sql:
+            userid = str(args[0]) if args else ""
+            return [
+                {"group_id": group_id}
+                for group_id, data in self.groups.items()
+                if userid in data["users"]
+            ]
+        if "FROM api_tokens" in sql:
+            return []
+        if "FROM resources r JOIN nodes" in sql and "kind='ha'" in sql:
+            return []
         raise AssertionError(sql)
 
     async def fetchrow(self, sql: str, *args: object) -> dict[str, object] | None:
@@ -149,6 +159,8 @@ class GapPool:
             return json.dumps(self.node_metadata.get(str(args[0]), {}))
         if "SELECT name FROM nodes WHERE status" in sql:
             return "pve01"
+        if "SELECT name FROM nodes ORDER BY name LIMIT 1" in sql:
+            return "pve01"
         return False
 
     async def execute(self, sql: str, *args: object) -> str:
@@ -217,7 +229,7 @@ async def test_cluster_index_and_replication_crud() -> None:
     )
     assert created["id"] == "repl-100"
     jobs = await _call(registry.get("/cluster/replication", "GET"), {}, pool)
-    assert jobs[0]["guest"] == "100"
+    assert jobs[0]["guest"] == 100
     fetched = await _call(
         registry.get("/cluster/replication/{id}", "GET"), {"id": "repl-100"}, pool
     )
@@ -257,10 +269,16 @@ async def test_access_user_and_group_detail() -> None:
 
 
 @pytest.mark.asyncio
-async def test_storage_content_get_and_upload() -> None:
+async def test_storage_content_get_and_upload(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = HandlerRegistry()
     register_storage_handlers(registry)
     pool = GapPool()
+
+    class FakeTaskRepository:
+        async def create(self, **kwargs: Any) -> Any:
+            return type("Task", (), {"upid": kwargs["upid"]})()
+
+    monkeypatch.setattr("app.handlers.nodes.TaskRepository", lambda _pool: FakeTaskRepository())
     item = await _call(
         registry.get("/nodes/{node}/storage/{storage}/content/{volume}", "GET"),
         {
@@ -276,7 +294,8 @@ async def test_storage_content_get_and_upload() -> None:
         {"node": "pve01", "storage": "local-lvm", "filename": "image.iso"},
         pool,
     )
-    assert "uploadid" in upload
+    assert isinstance(upload, str) and upload.startswith("UPID:")
+    assert any("image.iso" in str(item["volume_id"]) for item in pool.storage_contents)
 
 
 @pytest.mark.asyncio

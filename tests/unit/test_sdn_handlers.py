@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
+import pytest
 from fastapi import FastAPI, Request
 
 from app.api.registry import HandlerRegistry
@@ -17,6 +18,11 @@ class SdnPool:
         self.metadata: dict[str, Any] = {}
         self.nodes = {"pve1"}
 
+    async def fetch(self, query: str, *_arguments: object) -> list[dict[str, Any]]:
+        if "FROM nodes" in query:
+            return [{"name": name} for name in sorted(self.nodes)]
+        raise AssertionError(query)
+
     async def fetchrow(self, query: str, *_arguments: object) -> dict[str, Any] | None:
         if "FROM clusters WHERE id" in query:
             return {"metadata": json.dumps(self.metadata)}
@@ -25,6 +31,8 @@ class SdnPool:
     async def fetchval(self, query: str, *arguments: object) -> Any:
         if "EXISTS(SELECT 1 FROM nodes" in query:
             return str(arguments[0]) in self.nodes
+        if "SELECT name FROM nodes ORDER BY name LIMIT 1" in query:
+            return sorted(self.nodes)[0]
         raise AssertionError(query)
 
     async def execute(self, query: str, *arguments: object) -> str:
@@ -32,6 +40,16 @@ class SdnPool:
             self.metadata = json.loads(str(arguments[1]))
             return "UPDATE 1"
         raise AssertionError(query)
+
+
+class FakeTaskRepository:
+    def __init__(self, pool: SdnPool) -> None:
+        self.pool = pool
+        self.created: list[dict[str, Any]] = []
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.created.append(kwargs)
+        return type("Task", (), {"upid": kwargs["upid"]})()
 
 
 async def call(
@@ -45,7 +63,7 @@ async def call(
 def request(pool: SdnPool) -> Request:
     app = FastAPI()
     app.state.database = cast(AsyncpgDatabase, type("DB", (), {"pool": pool})())
-    return Request(
+    http = Request(
         {
             "type": "http",
             "app": app,
@@ -58,13 +76,17 @@ def request(pool: SdnPool) -> Request:
             "scheme": "http",
         }
     )
+    http.state.principal = "root@pam"
+    return http
 
 
-async def test_sdn_zone_vnet_subnet_and_node_views() -> None:
+async def test_sdn_zone_vnet_subnet_and_node_views(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = HandlerRegistry()
     register_sdn_handlers(registry)
     pool = SdnPool()
     http = request(pool)
+    repository = FakeTaskRepository(pool)
+    monkeypatch.setattr("app.handlers.cluster_extra.TaskRepository", lambda _pool: repository)
 
     await call(
         registry,
@@ -118,11 +140,20 @@ async def test_sdn_zone_vnet_subnet_and_node_views() -> None:
     )
     assert node_zones[0]["zone"] == "localzone"
     assert pool.metadata["sdn"]["pending"] is True
-    await call(
+    upid = await call(
         registry,
         "/cluster/sdn",
         "PUT",
         http,
         {"values": {"release-lock": 1}, "provided": frozenset()},
     )
+    assert isinstance(upid, str) and upid.startswith("UPID:")
     assert pool.metadata["sdn"]["pending"] is False
+    lock_token = await call(
+        registry,
+        "/cluster/sdn/lock",
+        "POST",
+        http,
+        {"values": {}, "provided": frozenset()},
+    )
+    assert isinstance(lock_token, str) and len(lock_token) >= 8

@@ -11,7 +11,7 @@ from app.db.migrations import migrate
 from app.db.pool import AsyncpgDatabase
 from app.db.primitives import ConflictError
 from app.db.repositories.resources import ResourceRepository
-from app.simulation.seed import apply_seed, small_profile
+from app.simulation.seed import apply_seed, lab_profile
 
 pytestmark = [
     pytest.mark.integration,
@@ -45,8 +45,8 @@ async def test_small_seed_is_idempotent() -> None:
     connection = await asyncpg.connect(os.environ["TEST_DATABASE_URL"])
     try:
         await migrate(connection)
-        await apply_seed(connection, small_profile())
-        await apply_seed(connection, small_profile())
+        await apply_seed(connection, lab_profile())
+        await apply_seed(connection, lab_profile())
         assert await connection.fetchval("SELECT count(*) FROM nodes WHERE name = 'pve01'") == 1
         assert (
             await connection.fetchval(
@@ -58,8 +58,8 @@ async def test_small_seed_is_idempotent() -> None:
         assert await connection.fetchval("SELECT count(*) FROM tasks WHERE status = 'success'") == 2
         assert await connection.fetchval("SELECT count(*) FROM virtual_machines") == 2
         assert await connection.fetchval("SELECT count(*) FROM containers") == 1
-        assert await connection.fetchval("SELECT count(*) FROM storages") == 2
-        assert await connection.fetchval("SELECT count(*) FROM storage_contents") == 4
+        assert await connection.fetchval("SELECT count(*) FROM storages") == 3
+        assert await connection.fetchval("SELECT count(*) FROM storage_contents") == 7
         assert await connection.fetchval("SELECT count(*) FROM identity_groups") == 1
         assert await connection.fetchval("SELECT count(*) FROM identity_group_members") == 1
         assert await connection.fetchval("SELECT count(*) FROM group_acl_entries") == 1
@@ -105,7 +105,7 @@ async def test_schema_readiness_and_optimistic_resource_repository() -> None:
     database = AsyncpgDatabase(Settings(database_url=url))
     try:
         await migrate(connection)
-        await apply_seed(connection, small_profile())
+        await apply_seed(connection, lab_profile())
         await database.connect()
         assert await database.is_ready()
 

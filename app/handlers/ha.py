@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -27,6 +28,13 @@ def _ha_groups(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(key): dict(value) for key, value in groups.items() if isinstance(value, dict)}
 
 
+def _ha_digest(payload: dict[str, Any]) -> str:
+    material = {key: value for key, value in payload.items() if key != "digest"}
+    return hashlib.sha1(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 def register_ha_handlers(registry: HandlerRegistry) -> None:
     async def ha_index(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, str]]:
         return subdirs("groups", "resources", "rules", "status")
@@ -41,17 +49,17 @@ def register_ha_handlers(registry: HandlerRegistry) -> None:
         for row in rows:
             payload = state(row["state"])
             sid = str(row["external_id"])
-            result.append(
-                {
-                    "sid": sid,
-                    "type": "vm" if sid.startswith("vm:") else "ct",
-                    "state": payload.get("state", "started"),
-                    "group": payload.get("group"),
-                    "node": str(row["node"]),
-                    "max_relocate": payload.get("max_relocate", 1),
-                    "max_restart": payload.get("max_restart", 1),
-                }
-            )
+            entry = {
+                "sid": sid,
+                "type": "vm" if sid.startswith("vm:") else "ct",
+                "state": payload.get("state", "started"),
+                "group": payload.get("group"),
+                "node": str(row["node"]),
+                "max_relocate": payload.get("max_relocate", 1),
+                "max_restart": payload.get("max_restart", 1),
+            }
+            entry["digest"] = _ha_digest(entry)
+            result.append(entry)
         return result
 
     async def ha_resource_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -208,29 +216,75 @@ def register_ha_handlers(registry: HandlerRegistry) -> None:
     async def ha_status(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, str]]:
         return subdirs("current", "manager_status")
 
-    async def ha_status_current(request: Request, _inputs: dict[str, Any]) -> dict[str, Any]:
-        row = await database(request).pool.fetchrow(
-            """SELECT count(*) FILTER (WHERE state->>'state' = 'started') AS started,
-                count(*) AS total
-            FROM resources WHERE kind='ha'"""
-        )
+    async def ha_status_current(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
         master = await database(request).pool.fetchval(
             "SELECT name FROM nodes WHERE status='online' ORDER BY name LIMIT 1"
         )
         metadata = await cluster_metadata(request)
         ha_raw = metadata.get("ha")
         ha: dict[str, Any] = dict(ha_raw) if isinstance(ha_raw, dict) else {}
+        armed = bool(ha.get("armed")) if "armed" in ha else False
         status_raw = ha.get("status_current")
         status: dict[str, Any] = dict(status_raw) if isinstance(status_raw, dict) else {}
-        armed = bool(ha.get("armed")) if "armed" in ha else False
-        return {
-            "quorate": status.get("quorate", metadata.get("quorate", 0)),
-            "mode": status.get("mode", "active" if armed else "disabled"),
-            "master_node": status.get("master_node", str(master or "")),
-            "ha_started": int(row["started"] or 0),
-            "ha_total": int(row["total"] or 0),
-            "armed": 1 if armed else 0,
-        }
+        quorate = bool(int(status.get("quorate", metadata.get("quorate", 1)) or 1))
+        master_node = str(status.get("master_node") or master or "")
+        rows = await database(request).pool.fetch(
+            """SELECT r.external_id, r.state, n.name AS node
+            FROM resources r JOIN nodes n ON n.id=r.node_id
+            WHERE r.kind='ha' ORDER BY r.external_id"""
+        )
+        nodes = await database(request).pool.fetch("SELECT name FROM nodes ORDER BY name")
+        result: list[dict[str, Any]] = [
+            {
+                "id": "quorum",
+                "type": "quorum",
+                "node": master_node,
+                "status": "OK" if quorate else "offline",
+                "quorate": quorate,
+            },
+            {
+                "id": "master",
+                "type": "master",
+                "node": master_node,
+                "status": "active" if armed else "disabled",
+            },
+            {
+                "id": "fencing",
+                "type": "fencing",
+                "node": master_node,
+                "status": "armed" if armed else "disarmed",
+                "armed-state": "armed" if armed else "disarmed",
+            },
+        ]
+        for node_row in nodes:
+            node_name = str(node_row["name"])
+            result.append(
+                {
+                    "id": f"lrm:{node_name}",
+                    "type": "lrm",
+                    "node": node_name,
+                    "status": "active" if quorate else "offline",
+                }
+            )
+        for row in rows:
+            payload = state(row["state"])
+            sid = str(row["external_id"])
+            crm = str(payload.get("state") or "started")
+            result.append(
+                {
+                    "id": f"service:{sid}",
+                    "type": "service",
+                    "sid": sid,
+                    "node": str(row["node"]),
+                    "crm_state": crm,
+                    "state": crm,
+                    "status": crm,
+                    "request_state": str(payload.get("request_state") or crm),
+                    "max_relocate": int(payload.get("max_relocate") or 1),
+                    "max_restart": int(payload.get("max_restart") or 1),
+                }
+            )
+        return result
 
     async def ha_manager_status(request: Request, _inputs: dict[str, Any]) -> dict[str, Any]:
         metadata = await cluster_metadata(request)
@@ -252,7 +306,7 @@ def register_ha_handlers(registry: HandlerRegistry) -> None:
             return [dict(item) for item in rules if isinstance(item, dict)]
         return []
 
-    async def ha_relocate(request: Request, inputs: dict[str, Any]) -> None:
+    async def ha_relocate(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         payload = values(inputs)
         sid = str(payload["sid"])
         target = str(payload.get("node") or payload.get("target") or "")
@@ -292,9 +346,14 @@ def register_ha_handlers(registry: HandlerRegistry) -> None:
             ha_row["id"],
             json.dumps(current, sort_keys=True),
         )
+        return {
+            "sid": sid,
+            "requested-node": target,
+            "comigrated-resources": [],
+        }
 
-    async def ha_migrate(request: Request, inputs: dict[str, Any]) -> None:
-        await ha_relocate(request, inputs)
+    async def ha_migrate(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        return await ha_relocate(request, inputs)
 
     async def ha_arm(request: Request, _inputs: dict[str, Any]) -> None:
         metadata = await cluster_metadata(request)

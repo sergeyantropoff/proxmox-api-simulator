@@ -150,8 +150,8 @@ curl -sS -H "Cookie: PVEAuthCookie=$TICKET" \
 
 Visit [http://localhost:8006/](http://localhost:8006/) for the interactive
 console, contract catalog (PVE 6–9), compatibility view, runtime contract apply,
-and demo-cluster controls. See [Web UI](web-ui.md) for light/dark theme
-screenshots and the full feature list.
+and demo-cluster controls. See [Web UI](web-ui.md) for screenshots and the
+full feature list.
 
 ## 8. Try a client library
 

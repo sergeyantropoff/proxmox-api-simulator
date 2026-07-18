@@ -6,10 +6,12 @@ Docker-only suite against the Proxmox API simulator.
 
 | Layer | What it covers |
 |---|---|
-| **Surface** | **100%** of declared contract methods for PVE majors **6–9** (every path+verb) via HTTP (`pvelib/surface.py`). Suite PASS requires `declared == probed` per major and zero critical failures (501, “not supported” messages, 5xx, exceptions, unknown verbs). |
-| **Lifecycle** | **`pulumi-proxmoxve` only** (BPG Terraform bridge) — Provider, inventory data sources, `VmLegacy` + non-empty checks. Negative auth via httpx. This is **not** full API coverage; the provider exposes dozens of resources, not thousands of contract methods. Provider uses internal HTTPS gateway; surface stays HTTP. |
+| **A — Surface (HTTP contract matrix)** | **100%** means every declared contract method for PVE majors **6–9** (path+verb: GET/PUT/POST/DELETE), plus **synthetic HEAD on each GET path**. Ticket + CSRF on mutations; form-urlencoded bodies; Proxmox `{ "data": … }` envelope. PASS requires `declared == probed` per major **and** aggregate, `critical=0` (501, “not supported”, 5xx, exceptions, empty/wrong 2xx envelopes). HEAD is in the verb histogram but **not** in the declared/probed denominator. |
+| **B — Lifecycle** | **`pulumi-proxmoxve` smoke only** (BPG Terraform bridge) — Provider, inventory data sources, `VmLegacy` + non-empty checks. **Not** 100% API and **not** provider resource-count coverage. HTTPS via lab TLS gateway; surface stays HTTP. |
 
-Reports (`pulumi/reports/report.html`, `results.json`, `junit.xml`) include a **Full contract coverage** summary with per-major and total `declared`/`probed` counts (e.g. `Coverage: 2324/2324 methods across majors 6–9`).
+Reports (`pulumi/reports/report.html`, `results.json`, `junit.xml`) include **Full contract coverage**, a **verb histogram (incl. HEAD)**, and a line like:
+
+`Coverage: N/N methods across majors 6–9 (critical=0)`
 
 ## Layout
 
@@ -43,7 +45,26 @@ open pulumi/reports/report.html
 make down
 ```
 
+### Quick curl (ticket → GET/POST + report)
+
+Against a running suite stack (`http://localhost:8006`):
+
+```bash
+TICKET=$(curl -s -c /tmp/pve.ck -b /tmp/pve.ck \
+  -d 'username=root@pam&password=secret' \
+  http://localhost:8006/api2/json/access/ticket)
+echo "$TICKET" | jq .
+CSRF=$(echo "$TICKET" | jq -r .data.CSRFPreventionToken)
+curl -s -b /tmp/pve.ck http://localhost:8006/api2/json/version | jq .
+curl -s -b /tmp/pve.ck -H "CSRFPreventionToken: $CSRF" \
+  -d 'vmid=100&name=demo' \
+  http://localhost:8006/api2/json/nodes/pve01/qemu | jq .
+```
+
+Open the HTML report: `pulumi-tests/pulumi/reports/report.html`.
+
 Provider env (set by Compose): `PROXMOX_VE_ENDPOINT=https://tls-gateway:8443/`
 (internal suite TLS — `pulumi-proxmoxve` rejects `http://`), plus username/password
 /`INSECURE`. Surface probe uses `API_URL=http://simulator:8006`. Host lab URL
 remains plain `http://localhost:8006/` (Kubernetes HTTPS is Ingress-only).
+Seed for CI/suite: `SEED_PROFILE=small` (Compose default).

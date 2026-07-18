@@ -29,6 +29,9 @@ def lxc_handler(repository: TaskRepository, clock: Clock) -> TaskHandler:
             )
         if operation == "migrate" or operation == "remote-migrate":
             return await _migrate(repository, task, resource_id, clock)
+        if operation == "resize":
+            await repository.append_log(task.id, "container resize completed")
+            return {"status": "OK"}
         async with repository.pool.acquire() as connection:
             row = await connection.fetchrow("SELECT state FROM resources WHERE id=$1", resource_id)
             if row is None:

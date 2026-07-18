@@ -15,9 +15,11 @@ from app.handlers.common import (
     database,
     require_node,
     save_cluster_metadata,
+    state,
     subdirs,
     values,
 )
+from app.simulation.ceph_defaults import CEPH_FLAG_DESCRIPTIONS, default_ceph_flags
 from app.tasks.repository import TaskRepository
 from app.tasks.upid import Upid
 
@@ -55,10 +57,9 @@ def _save_ha_rules(metadata: dict[str, Any], rules: list[dict[str, Any]]) -> Non
 
 
 def _replication_jobs(metadata: dict[str, Any]) -> list[dict[str, Any]]:
-    jobs = metadata.get("replication", [])
-    if not isinstance(jobs, list):
-        return []
-    return [dict(item) for item in jobs if isinstance(item, dict)]
+    from app.handlers.cluster import _replication_jobs as normalize
+
+    return normalize(metadata)
 
 
 def _ceph(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -189,10 +190,42 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
     async def metrics_export(request: Request, _inputs: dict[str, Any]) -> dict[str, Any]:
         metadata = await cluster_metadata(request)
         metrics = _metrics(metadata)
-        return {
-            "data": str(metrics.get("export_data") or ""),
-            "timestamp": int(time.time()),
-        }
+        now = int(time.time())
+        seeded = metrics.get("export_series")
+        if isinstance(seeded, list) and seeded:
+            series = [dict(item) for item in seeded if isinstance(item, dict)]
+            return {"data": series, "timestamp": now}
+        # Build a PVE-shaped metric array from live inventory (scales with seed).
+        rows = await database(request).pool.fetch("SELECT name FROM nodes ORDER BY name")
+        series: list[dict[str, Any]] = []
+        for row in rows:
+            node = str(row["name"])
+            series.append(
+                {
+                    "id": f"node/{node}",
+                    "metric": "up",
+                    "timestamp": now,
+                    "type": "gauge",
+                    "value": 1,
+                }
+            )
+        guests = await database(request).pool.fetch(
+            """SELECT r.kind, r.external_id, n.name AS node
+            FROM resources r JOIN nodes n ON n.id=r.node_id
+            WHERE r.kind IN ('qemu', 'lxc')
+            ORDER BY r.external_id::integer"""
+        )
+        for guest in guests:
+            series.append(
+                {
+                    "id": f"{guest['kind']}/{guest['external_id']}",
+                    "metric": "up",
+                    "timestamp": now,
+                    "type": "gauge",
+                    "value": 1,
+                }
+            )
+        return {"data": series, "timestamp": now}
 
     async def metrics_server_list(
         request: Request, _inputs: dict[str, Any]
@@ -398,43 +431,69 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
     ) -> list[dict[str, str]]:
         return subdirs("flags", "metadata", "status")
 
-    async def ceph_flags_get(request: Request, _inputs: dict[str, Any]) -> dict[str, int]:
+    async def ceph_flags_get(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
         metadata = await cluster_metadata(request)
         ceph = _ceph(metadata)
-        flags = ceph.get("flags")
-        if not isinstance(flags, dict):
-            return {}
-        return {str(key): int(value) for key, value in flags.items()}
+        stored = ceph.get("flags")
+        flags = default_ceph_flags()
+        if isinstance(stored, dict):
+            for name, value in stored.items():
+                if name in flags:
+                    flags[name] = int(value)
+        return [
+            {
+                "name": name,
+                "value": bool(flags[name]),
+                "description": description,
+            }
+            for name, description in sorted(CEPH_FLAG_DESCRIPTIONS.items())
+        ]
 
-    async def ceph_flags_put(request: Request, inputs: dict[str, Any]) -> dict[str, int]:
+    async def ceph_flags_put(request: Request, inputs: dict[str, Any]) -> str:
         payload = values(inputs)
         metadata = await cluster_metadata(request)
         ceph = dict(_ceph(metadata))
-        flags = dict(ceph.get("flags") or {})
+        flags = default_ceph_flags()
+        stored = ceph.get("flags")
+        if isinstance(stored, dict):
+            for name, value in stored.items():
+                if name in flags:
+                    flags[name] = int(value)
         for key, value in payload.items():
             if key in {"delete", "digest"}:
                 continue
+            if key not in CEPH_FLAG_DESCRIPTIONS:
+                raise ApiError(400, f"unknown ceph flag '{key}'")
             flags[str(key)] = int(value)
         ceph["flags"] = flags
         metadata["ceph"] = ceph
         await save_cluster_metadata(request, metadata)
-        return {str(key): int(value) for key, value in flags.items()}
+        return await _cluster_task(request, task_type="ceph-flags", worker="cephflags")
 
-    async def ceph_flag_get(request: Request, inputs: dict[str, Any]) -> dict[str, int]:
+    async def ceph_flag_get(request: Request, inputs: dict[str, Any]) -> bool:
         flag = str(values(inputs)["flag"])
+        if flag not in CEPH_FLAG_DESCRIPTIONS:
+            raise ApiError(404, "ceph flag does not exist")
         metadata = await cluster_metadata(request)
         ceph = _ceph(metadata)
         flags = ceph.get("flags")
-        if not isinstance(flags, dict) or flag not in flags:
-            raise ApiError(404, "ceph flag does not exist")
-        return {flag: int(flags[flag])}
+        if isinstance(flags, dict) and flag in flags:
+            return bool(int(flags[flag]))
+        return False
 
-    async def ceph_flag_put(request: Request, inputs: dict[str, Any]) -> dict[str, int]:
+    async def ceph_flag_put(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)
         flag = str(payload["flag"])
+        if flag not in CEPH_FLAG_DESCRIPTIONS:
+            raise ApiError(404, "ceph flag does not exist")
         metadata = await cluster_metadata(request)
         ceph = dict(_ceph(metadata))
-        flags = dict(ceph.get("flags") or {})
+        flags = default_ceph_flags()
+        stored = ceph.get("flags")
+        if isinstance(stored, dict):
+            for name, value in stored.items():
+                if name in flags:
+                    flags[name] = int(value)
         if "value" in payload:
             flags[flag] = int(payload["value"])
         elif flag in payload:
@@ -444,7 +503,6 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         ceph["flags"] = flags
         metadata["ceph"] = ceph
         await save_cluster_metadata(request, metadata)
-        return {flag: int(flags[flag])}
 
     async def ceph_metadata(request: Request, _inputs: dict[str, Any]) -> dict[str, Any]:
         metadata = await cluster_metadata(request)
@@ -452,12 +510,77 @@ def register_cluster_extra_handlers(registry: HandlerRegistry) -> None:
         config_raw = ceph.get("config")
         config: dict[str, Any] = dict(config_raw) if isinstance(config_raw, dict) else {}
         version = ceph.get("version")
-        flags = ceph.get("flags")
+        nodes = await database(request).pool.fetch("SELECT name FROM nodes ORDER BY name")
+        node_names = [str(row["name"]) for row in nodes]
+        version_str = (
+            str(version.get("str"))
+            if isinstance(version, dict) and version.get("str")
+            else "18.2.2"
+        )
+        version_short = ".".join(version_str.split(".")[:2]) if version_str else "18.2"
+        osd_rows = await database(request).pool.fetch(
+            """SELECT r.external_id, r.state, n.name AS node
+            FROM resources r JOIN nodes n ON n.id=r.node_id
+            WHERE r.kind='ceph-osd' ORDER BY r.external_id"""
+        )
+        osd_map: dict[str, Any] = {}
+        for row in osd_rows:
+            payload = state(row["state"])
+            external = str(row["external_id"])
+            osd_id = str(payload.get("osd_id", external.removeprefix("osd.")))
+            hostname = str(row["node"])
+            osd_map[osd_id] = {
+                "id": int(osd_id) if osd_id.isdigit() else osd_id,
+                "hostname": hostname,
+                "name": f"osd.{osd_id}",
+                "ceph_version": version_str,
+                "ceph_version_short": version_short,
+                "ceph_release": "reef",
+                "device_class": payload.get("device_class", "hdd"),
+                "dev": payload.get("dev", ""),
+            }
+        if not osd_map:
+            fallback_host = node_names[0] if node_names else "pve01"
+            osd_map["0"] = {
+                "id": 0,
+                "hostname": fallback_host,
+                "name": "osd.0",
+                "ceph_version": version_str,
+                "ceph_version_short": version_short,
+                "ceph_release": "reef",
+            }
+
+        def _service_entry(name: str, index: int) -> dict[str, Any]:
+            return {
+                "name": name,
+                "hostname": name,
+                "addr": f"10.0.0.{index}",
+                "ceph_version": version_str,
+                "ceph_version_short": version_short,
+                "ceph_release": "reef",
+            }
+
         return {
-            "version": dict(version) if isinstance(version, dict) else {},
+            "mds": {},
+            "mgr": {
+                f"mgr@{node}": _service_entry(node, index)
+                for index, node in enumerate(node_names[:1] or ["pve01"], start=1)
+            },
+            "mon": {
+                f"mon@{node}": _service_entry(node, index)
+                for index, node in enumerate(node_names[:3] or ["pve01"], start=1)
+            },
+            "node": {
+                node: {
+                    "name": node,
+                    "hostname": node,
+                    "ceph_version": version_str,
+                    "ceph_version_short": version_short,
+                }
+                for node in (node_names or ["pve01"])
+            },
+            "osd": list(osd_map.values()),
             "fsid": str(config.get("fsid") or ""),
-            "initialized": int(bool(ceph.get("initialized"))),
-            "flags": dict(flags) if isinstance(flags, dict) else {},
         }
 
     async def ha_rule_create(request: Request, inputs: dict[str, Any]) -> None:

@@ -113,9 +113,9 @@ Interactive console with light/dark themes, endpoint catalog for PVE 6–9,
 runtime contract hot-swap, and a UPID task monitor. More detail:
 [Web UI](docs/web-ui.md).
 
-![Web UI light theme](docs/images/web-ui-light.png)
+![Web UI main](docs/images/web-ui-main.png)
 
-![Web UI dark theme](docs/images/web-ui-dark.png)
+![Web UI API catalog](docs/images/web-ui-api-catalog.png)
 
 ## Documentation
 

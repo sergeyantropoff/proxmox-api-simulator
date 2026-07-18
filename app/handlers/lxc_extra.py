@@ -43,8 +43,11 @@ def register_lxc_extra_handlers(registry: HandlerRegistry) -> None:
         return [dict(item) for item in ifaces] if isinstance(ifaces, list) else []
 
     async def move_volume(request: Request, inputs: dict[str, Any]) -> str:
+        from app.handlers.lxc import _create_task
+
         values = _values(inputs)
-        resource = await _lxc_resource(request, str(values["node"]), str(values["vmid"]))
+        node, vmid = str(values["node"]), str(values["vmid"])
+        resource = await _lxc_resource(request, node, vmid)
         volume = str(values.get("volume") or values.get("disk") or "rootfs")
         storage = str(values.get("storage") or "local-lvm")
         config = _state(resource["config"])
@@ -60,7 +63,17 @@ def register_lxc_extra_handlers(registry: HandlerRegistry) -> None:
             moves = state["volume_moves"] = []
         moves.append({"volume": volume, "storage": storage})
         await _save_state(request, resource["id"], state)
-        return f"UPID:{values['node']}:lxc-move-volume:{values['vmid']}"
+        return await _create_task(
+            request,
+            node=node,
+            vmid=vmid,
+            task_type="lxc-move-volume",
+            payload={
+                "resource_id": str(resource["id"]),
+                "volume": volume,
+                "storage": storage,
+            },
+        )
 
     async def rrd(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         values = _values(inputs)

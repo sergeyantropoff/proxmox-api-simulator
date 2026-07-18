@@ -73,6 +73,33 @@ def _surface_error(major: dict[str, Any]) -> str:
     return f"{len(fails)} critical: " + "; ".join(parts)
 
 
+def _verb_histogram_rows(surface: list[dict[str, Any]]) -> list[str]:
+    rows: list[str] = []
+    for major in surface:
+        histogram = major.get("verb_histogram") or {}
+        if not histogram:
+            # Fall back to by_verb totals when slim payload lacks histogram.
+            by_verb = major.get("by_verb") or {}
+            histogram = {
+                verb: {"total": sum(buckets.values()), "buckets": buckets}
+                for verb, buckets in by_verb.items()
+            }
+        for verb, info in sorted(histogram.items()):
+            buckets = info.get("buckets") or {}
+            bucket_txt = ", ".join(
+                f"{name}={count}" for name, count in sorted(buckets.items()) if count
+            )
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(major.get('version') or major.get('major')))}</td>"
+                f"<td>{html.escape(str(verb))}</td>"
+                f"<td>{html.escape(str(info.get('total') or 0))}</td>"
+                f"<td><code>{html.escape(bucket_txt)}</code></td>"
+                "</tr>"
+            )
+    return rows
+
+
 def write_html(payload: dict[str, Any], path: Path) -> None:
     surface = payload.get("surface") or []
     scenarios = payload.get("scenarios") or []
@@ -237,6 +264,20 @@ code {{ font-family: var(--mono); font-size: .85em; }}
     </tr></thead>
     <tbody>
       {''.join(surface_rows) or '<tr><td colspan="8" class="empty">No surface results</td></tr>'}
+    </tbody>
+  </table>
+
+  <h2>Verb histogram (incl. synthetic HEAD)</h2>
+  <p class="lead">
+    Contract verbs GET/PUT/POST/DELETE count toward coverage.
+    HEAD is probed on every GET path for the matrix but is not part of declared/probed.
+  </p>
+  <table>
+    <thead><tr>
+      <th>Major</th><th>Verb</th><th>Total</th><th>Buckets</th>
+    </tr></thead>
+    <tbody>
+      {''.join(_verb_histogram_rows(surface)) or '<tr><td colspan="4" class="empty">No histogram</td></tr>'}
     </tbody>
   </table>
 

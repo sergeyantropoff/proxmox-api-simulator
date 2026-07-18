@@ -19,7 +19,7 @@ def register_legacy_aliases(registry: HandlerRegistry) -> None:
 
     alias("/access/tfa", "POST", "/access/tfa/{userid}", "POST")
     alias("/access/tfa", "PUT", "/access/tfa/{userid}/{id}", "PUT")
-    alias("/cluster/backupinfo", "GET", "/cluster/backup-info", "GET")
+    # /cluster/backupinfo is registered as a PVE 6 stub string in backup.py
     alias(
         "/cluster/backupinfo/not_backed_up",
         "GET",

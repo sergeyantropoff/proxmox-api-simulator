@@ -27,7 +27,7 @@ from app.contracts.model import Method, Snapshot
 from app.db.migrations import migrate
 from app.db.pool import AsyncpgDatabase
 from app.main import create_app
-from app.simulation.seed import apply_seed, small_profile
+from app.simulation.seed import apply_seed, lab_profile
 from app.web.contract_catalog import get_major_releases
 
 _BUNDLED_9 = Path(
@@ -119,7 +119,7 @@ async def prepare_db(url: str) -> None:
     connection = await asyncpg.connect(url)
     try:
         await migrate(connection)
-        await apply_seed(connection, small_profile())
+        await apply_seed(connection, lab_profile())
     finally:
         await connection.close()
 

@@ -42,6 +42,7 @@ class HandlerPool:
                 {
                     "external_id": "osd.0",
                     "state": '{"osd_id":0,"status":"up","in":true,"weight":1.0}',
+                    "node": "pve01",
                 }
             ]
         if "FROM pools" in sql:
@@ -54,7 +55,14 @@ class HandlerPool:
                 }
             ]
         if "FROM pool_members" in sql:
-            return [{"external_id": "100"}]
+            return [
+                {
+                    "external_id": "100",
+                    "kind": "qemu",
+                    "state": '{"name":"demo","status":"stopped"}',
+                    "node": "pve01",
+                }
+            ]
         if "FROM task_logs" in sql:
             return [{"message": "seeded task", "sequence": 1}]
         if "FROM tasks" in sql:
@@ -101,6 +109,8 @@ class HandlerPool:
             return 150
         if "count(*)::int FROM resources WHERE kind='ceph-osd'" in sql:
             return 300
+        if "COUNT(*) FROM nodes" in sql or "count(*) FROM nodes" in sql:
+            return 1
         if "SELECT resource_id FROM storages" in sql:
             return uuid.uuid4()
         return False
@@ -139,7 +149,10 @@ async def test_cluster_status_and_nextid() -> None:
     registry = HandlerRegistry()
     register_cluster_handlers(registry)
     status = await _call(registry.get("/cluster/status", "GET"), {})
-    assert status[0]["name"] == "pve01"
+    assert status[0]["type"] == "cluster"
+    assert status[0]["quorate"] is True
+    assert status[1]["name"] == "pve01"
+    assert status[1]["online"] is True
     nextid = await _call(registry.get("/cluster/nextid", "GET"), {})
     assert nextid == 151
 
@@ -158,7 +171,8 @@ async def test_storage_and_ceph_handlers() -> None:
         registry.get("/nodes/{node}/ceph/osd", "GET"),
         {"node": "pve01"},
     )
-    assert osds[0]["status"] == "up"
+    assert osds["root"]["type"] == "root"
+    assert osds["root"]["children"][0]["children"][0]["status"] == "up"
     ceph_status = await _call(registry.get("/cluster/ceph/status", "GET"), {})
     assert ceph_status["osdmap"]["num_osds"] == 1
 
@@ -169,7 +183,9 @@ async def test_pools_list() -> None:
     register_pool_handlers(registry)
     pools = await _call(registry.get("/pools", "GET"), {})
     assert pools[0]["poolid"] == "production"
-    assert pools[0]["members"] == ["100"]
+    assert pools[0]["members"][0]["vmid"] == 100
+    assert pools[0]["members"][0]["type"] == "qemu"
+    assert pools[0]["members"][0]["node"] == "pve01"
 
 
 @pytest.mark.asyncio

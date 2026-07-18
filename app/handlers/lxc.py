@@ -38,27 +38,120 @@ def _state(value: object) -> dict[str, Any]:
     return dict(cast(Mapping[str, Any], value))
 
 
+# Runtime-only keys stored in ``resources.state``; never echo on GET /config.
+_LXC_CONFIG_INTERNAL = frozenset(
+    {
+        "agent",
+        "cloudinit_dump",
+        "config",
+        "consoles",
+        "interfaces",
+        "migrate_preconditions",
+        "name",
+        "rrd",
+        "rrddata",
+        "status",
+        "volume_moves",
+    }
+)
+
+
+def _public_lxc_config(
+    config: dict[str, Any], state: dict[str, Any], *, vmid: int
+) -> dict[str, Any]:
+    import hashlib
+
+    merged = {**state, **config}
+    payload: dict[str, Any] = {"vmid": vmid}
+    for key, value in merged.items():
+        if key in _LXC_CONFIG_INTERNAL:
+            continue
+        if isinstance(value, dict | list):
+            continue
+        payload[key] = value
+    digest_src = {key: value for key, value in payload.items() if key != "digest"}
+    payload["digest"] = hashlib.sha1(
+        json.dumps(digest_src, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return payload
+
+
+def _lxc_index_item(vmid: int, vm_state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    status = str(vm_state.get("status", "stopped"))
+    running = status in {"running", "paused"}
+    memory_mb = int(config.get("memory", config.get("mem", 512)))
+    maxmem = memory_mb * 2**20
+    return {
+        "vmid": vmid,
+        "name": str(config.get("hostname", config.get("name", f"ct-{vmid}"))),
+        "status": status,
+        "cpus": int(config.get("cores", config.get("cpus", 1))),
+        "cpu": float(vm_state.get("cpu", 0.05 if running else 0.0)),
+        "maxmem": maxmem,
+        "mem": int(vm_state.get("mem", maxmem // 2 if running else 0)),
+        "maxdisk": int(vm_state.get("maxdisk", config.get("maxdisk", 8 * 1024**3))),
+        "disk": int(vm_state.get("disk", 0)),
+        "diskread": int(vm_state.get("diskread", 0)),
+        "diskwrite": int(vm_state.get("diskwrite", 0)),
+        "netin": int(vm_state.get("netin", 0)),
+        "netout": int(vm_state.get("netout", 0)),
+        "maxswap": int(config.get("swap", 512)) * 2**20,
+        "uptime": int(vm_state.get("uptime", 0)) if running else 0,
+        "lock": str(vm_state.get("lock", "")),
+        "tags": str(config.get("tags", "")),
+        "template": int(bool(vm_state.get("template", False))),
+        "pressurecpusome": float(vm_state.get("pressurecpusome", 0.0)),
+        "pressurecpufull": float(vm_state.get("pressurecpufull", 0.0)),
+        "pressureiosome": float(vm_state.get("pressureiosome", 0.0)),
+        "pressureiofull": float(vm_state.get("pressureiofull", 0.0)),
+        "pressurememorysome": float(vm_state.get("pressurememorysome", 0.0)),
+        "pressurememoryfull": float(vm_state.get("pressurememoryfull", 0.0)),
+    }
+
+
 def register_lxc_handlers(registry: HandlerRegistry) -> None:
     async def lxc_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         node = str(_values(inputs)["node"])
         rows = await _database(request).pool.fetch(
-            """SELECT r.external_id::integer AS vmid, r.state
-            FROM resources r JOIN nodes n ON n.id=r.node_id
+            """SELECT r.external_id::integer AS vmid, r.state, c.config
+            FROM resources r
+            JOIN nodes n ON n.id=r.node_id
+            JOIN containers c ON c.resource_id=r.id
             WHERE n.name=$1 AND r.kind='lxc' ORDER BY r.external_id::integer""",
             node,
         )
-        return [{"vmid": int(row["vmid"]), **_state(row["state"])} for row in rows]
+        return [
+            _lxc_index_item(int(row["vmid"]), _state(row["state"]), _state(row["config"]))
+            for row in rows
+        ]
 
     async def lxc_config(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         node, vmid = str(_values(inputs)["node"]), str(_values(inputs)["vmid"])
         row = await _lxc_resource(request, node, vmid)
-        return {"vmid": int(vmid), **_state(row["config"]), **_state(row["state"])}
+        return _public_lxc_config(_state(row["config"]), _state(row["state"]), vmid=int(vmid))
 
     async def lxc_current(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
-        return await lxc_config(request, inputs)
+        payload = _values(inputs)
+        node, vmid = str(payload["node"]), int(payload["vmid"])
+        row = await _lxc_resource(request, node, str(vmid))
+        vm_state = _state(row["state"])
+        config = _state(row["config"])
+        item = _lxc_index_item(vmid, vm_state, config)
+        item["ha"] = {"managed": int(vm_state.get("ha_managed", 0))}
+        return item
 
-    async def lxc_status(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
-        return await lxc_config(request, inputs)
+    async def lxc_status(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
+        payload = _values(inputs)
+        await _lxc_resource(request, str(payload["node"]), str(payload["vmid"]))
+        return subdirs(
+            "current",
+            "reboot",
+            "resume",
+            "shutdown",
+            "start",
+            "stop",
+            "suspend",
+        )
 
     async def mutate(operation: str, request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)
@@ -421,7 +514,7 @@ def register_lxc_handlers(registry: HandlerRegistry) -> None:
             }
         }
 
-    async def lxc_resize(request: Request, inputs: dict[str, Any]) -> None:
+    async def lxc_resize(request: Request, inputs: dict[str, Any]) -> str:
         payload = _values(inputs)
         node, vmid = str(payload["node"]), str(payload["vmid"])
         disk = str(payload.get("disk") or "rootfs")
@@ -445,6 +538,13 @@ def register_lxc_handlers(registry: HandlerRegistry) -> None:
             updated_at=now() WHERE id=$1""",
             resource["id"],
             json.dumps({disk: config[disk]}, sort_keys=True),
+        )
+        return await _create_task(
+            request,
+            node=node,
+            vmid=vmid,
+            task_type="lxc-resize",
+            payload={"resource_id": str(resource["id"]), "disk": disk, "size": size},
         )
 
     async def lxc_template(request: Request, inputs: dict[str, Any]) -> None:
@@ -537,6 +637,8 @@ async def _create_task(
         "lxc-clone": "pctclone",
         "lxc-migrate": "pctmigrate",
         "lxc-remote-migrate": "pctremote",
+        "lxc-resize": "pctresize",
+        "lxc-move-volume": "pctmove",
     }[task_type]
     upid = str(Upid.allocate(node, worker_type, vmid, str(request.state.principal)))
     try:

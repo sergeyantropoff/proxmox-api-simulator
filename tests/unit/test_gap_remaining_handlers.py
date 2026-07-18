@@ -28,8 +28,11 @@ class GapRemainingPool:
         raise AssertionError(query)
 
     async def fetchval(self, query: str, *arguments: object) -> Any:
+        del arguments
         if "EXISTS(SELECT 1 FROM nodes" in query:
             return True
+        if "SELECT name FROM nodes ORDER BY name LIMIT 1" in query:
+            return "pve01"
         raise AssertionError(query)
 
     async def execute(self, query: str, *arguments: object) -> str:
@@ -68,10 +71,16 @@ def _request(pool: GapRemainingPool, *, method: str = "GET") -> Request:
 
 
 @pytest.mark.asyncio
-async def test_disks_directory_create_persists() -> None:
+async def test_disks_directory_create_persists(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = HandlerRegistry()
     register_nodes_extra_handlers(registry)
     pool = GapRemainingPool()
+
+    class FakeTaskRepository:
+        async def create(self, **kwargs: Any) -> Any:
+            return type("Task", (), {"upid": kwargs["upid"]})()
+
+    monkeypatch.setattr("app.handlers.nodes.TaskRepository", lambda _pool: FakeTaskRepository())
     create = registry.get("/nodes/{node}/disks/directory", "POST")
     assert create is not None
     created = await create(
@@ -81,7 +90,7 @@ async def test_disks_directory_create_persists() -> None:
             "provided": frozenset(),
         },
     )
-    assert created["name"] == "tank"
+    assert isinstance(created, str) and created.startswith("UPID:")
     ops = pool.node_metadata["pve01"]["ops"]
     assert any(item["name"] == "tank" for item in ops["disks"]["directory"])
 

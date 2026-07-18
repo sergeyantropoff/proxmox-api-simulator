@@ -161,7 +161,23 @@ async def ui_demo_state(request: Request) -> JSONResponse:
 @router.post("/ui/api/demo/load", include_in_schema=False)
 async def ui_demo_load(request: Request) -> JSONResponse:
     pool = _database_pool(request)
-    profile = build_profile("demo-cluster")
+    requested = "small"
+    if request.query_params.get("profile"):
+        requested = str(request.query_params.get("profile"))
+    else:
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if isinstance(body, dict) and body.get("profile"):
+            requested = str(body["profile"])
+    allowed = {"small", "large", "big"}
+    if requested not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown cluster profile '{requested}' (expected: small, large, big)",
+        )
+    profile = build_profile(requested)
     async with pool.acquire() as connection:
         await apply_seed(connection, profile)
         summary = await simulation_state_summary(connection)
@@ -179,7 +195,7 @@ async def ui_demo_unload(request: Request) -> JSONResponse:
             summary = await simulation_state_summary(connection)
     except Exception as error:
         raise HTTPException(
-            status_code=500, detail=f"failed to remove demo data: {error}"
+            status_code=500, detail=f"failed to reset to minimal cluster: {error}"
         ) from error
     return JSONResponse({"ok": True, "profile": profile.name, "summary": summary})
 

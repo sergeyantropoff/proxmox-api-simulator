@@ -41,7 +41,13 @@ class QemuPool:
     async def fetch(self, sql: str, *args: object) -> list[dict[str, object]]:
         del args
         if "FROM resources" in sql:
-            return [{"vmid": 150, "state": '{"status":"stopped","name":"vm"}'}]
+            return [
+                {
+                    "vmid": 150,
+                    "state": '{"status":"stopped","name":"vm"}',
+                    "config": '{"name":"vm","memory":2048,"cores":2}',
+                }
+            ]
         assert "FROM snapshots" in sql
         return [
             {
@@ -325,9 +331,11 @@ async def test_qemu_clone_and_migrate_handlers(monkeypatch: pytest.MonkeyPatch) 
     )
     assert migrate_upid.startswith("UPID:pve1:")
     assert tasks[-1]["task_type"] == "qemu-migrate"
-    assert (
-        await resize(http_request, inputs(node="pve1", vmid=150, disk="scsi0", size="+2G")) is None
+    resize_upid = await resize(
+        http_request, inputs(node="pve1", vmid=150, disk="scsi0", size="+2G")
     )
+    assert resize_upid.startswith("UPID:pve1:")
+    assert tasks[-1]["task_type"] == "qemu-resize"
     move_upid = await move(
         http_request, inputs(node="pve1", vmid=150, disk="scsi0", storage="local")
     )

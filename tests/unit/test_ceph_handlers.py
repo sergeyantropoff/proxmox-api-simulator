@@ -125,7 +125,7 @@ async def test_ceph_pool_and_osd_mutations_persist() -> None:
 
     await create_pool(http, {"values": {"node": "pve1", "name": "vms"}, "provided": frozenset()})
     pools = await list_pool(http, {"values": {"node": "pve1"}, "provided": frozenset()})
-    assert any(item["pool"] == "vms" for item in pools)
+    assert any(item.get("pool_name") == "vms" for item in pools)
     assert "vms" in pool.cluster_metadata["ceph"]["pools"]
 
     await create_osd(http, {"values": {"node": "pve1", "dev": "/dev/sdb"}, "provided": frozenset()})

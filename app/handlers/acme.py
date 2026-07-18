@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from fastapi import Request
@@ -35,7 +37,7 @@ def _default_directory(acme: dict[str, Any]) -> str:
         for item in directories:
             if isinstance(item, dict) and item.get("url"):
                 return str(item["url"])
-    return ""
+    return "https://acme-v02.api.letsencrypt.org/directory"
 
 
 def register_acme_handlers(registry: HandlerRegistry) -> None:
@@ -61,7 +63,7 @@ def register_acme_handlers(registry: HandlerRegistry) -> None:
             for name, item in sorted(accounts.items())
         ]
 
-    async def account_create(request: Request, inputs: dict[str, Any]) -> None:
+    async def account_create(request: Request, inputs: dict[str, Any]) -> str:
         payload = values(inputs)
         name = str(payload.get("name") or "default")
         metadata = await cluster_metadata(request)
@@ -80,6 +82,7 @@ def register_acme_handlers(registry: HandlerRegistry) -> None:
             "location": f"https://acme.example.local/acct/{name}",
         }
         await save_cluster_metadata(request, metadata)
+        return name
 
     async def account_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         name = str(values(inputs)["name"])
@@ -88,8 +91,10 @@ def register_acme_handlers(registry: HandlerRegistry) -> None:
         if not isinstance(account, dict):
             raise ApiError(404, "ACME account does not exist")
         return {
-            "name": name,
-            "contact": account.get("contact"),
+            "account": {
+                "name": name,
+                "contact": account.get("contact"),
+            },
             "directory": account.get("directory"),
             "tos": account.get("tos_url"),
             "location": account.get("location"),
@@ -123,7 +128,13 @@ def register_acme_handlers(registry: HandlerRegistry) -> None:
         for plugin_id, item in sorted(plugins.items()):
             if plugin_type and item.get("type") != plugin_type:
                 continue
-            result.append({"plugin": plugin_id, **{k: v for k, v in item.items() if k != "data"}})
+            entry = {"plugin": plugin_id, **{k: v for k, v in item.items() if k != "data"}}
+            if "digest" not in entry:
+                material = {k: v for k, v in entry.items() if k != "digest"}
+                entry["digest"] = hashlib.sha1(
+                    json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest()
+            result.append(entry)
         return result
 
     async def plugins_create(request: Request, inputs: dict[str, Any]) -> None:

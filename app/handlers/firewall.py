@@ -112,7 +112,7 @@ def register_firewall_handlers(registry: HandlerRegistry) -> None:
             options = section.get("options", {})
             return dict(options) if isinstance(options, dict) else {}
 
-        async def options_put(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        async def options_put(request: Request, inputs: dict[str, Any]) -> None:
             payload = await _ready(request, inputs)
             firewall = await _load_firewall(request)
             section = _ensure_scope(firewall, scope_fn(payload))
@@ -123,7 +123,6 @@ def register_firewall_handlers(registry: HandlerRegistry) -> None:
                 current[key] = value
             section["options"] = current
             await _save_firewall(request, firewall)
-            return current
 
         async def rules_list(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
             payload = await _ready(request, inputs)

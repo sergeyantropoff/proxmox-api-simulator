@@ -67,7 +67,7 @@ hypothesis/
 *.sublime-project
 *.sublime-workspace
 
-# Docker / local runtime
+# Docker / local runtime (`make up-local` writes port remaps here)
 *.log
 docker-compose.override.yml
 

@@ -22,7 +22,7 @@ from app.config import Settings
 from app.db.migrations import migrate
 from app.db.pool import AsyncpgDatabase
 from app.main import create_app
-from app.simulation.seed import apply_seed, small_profile
+from app.simulation.seed import apply_seed, lab_profile
 
 pytestmark = [
     pytest.mark.integration,
@@ -40,7 +40,7 @@ async def _prepare_database(url: str) -> None:
     connection = await asyncpg.connect(url)
     try:
         await migrate(connection)
-        await apply_seed(connection, small_profile())
+        await apply_seed(connection, lab_profile())
     finally:
         await connection.close()
 

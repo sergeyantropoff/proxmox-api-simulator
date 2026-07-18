@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.api.openapi import contract_openapi_tag
 from app.config import Settings
-from app.contracts.examples import path_param_example, schema_example
+from app.contracts.examples import path_param_example, schema_example, wire_param_name
 from app.contracts.importer import RemoteSourceImporter
 from app.contracts.model import Method, Parameter, Snapshot
 from app.contracts.normalize import normalize_snapshot
@@ -226,16 +226,25 @@ def _path_param_names(path: str) -> tuple[str, ...]:
     return tuple(match.group(1) for match in _PATH_PARAM.finditer(path))
 
 
-def _parameter_payload(parameter: Parameter) -> dict[str, object]:
+def _parameter_payload(parameter: Parameter, *, wire_name: str | None = None) -> dict[str, object]:
     schema = parameter.definition
-    return {
-        "name": parameter.name,
+    name = wire_name or parameter.name
+    typetext = schema.extra.get("typetext")
+    payload: dict[str, object] = {
+        "name": name,
         "type": schema.type,
         "description": schema.description,
         "optional": bool(schema.optional),
         "enum": list(schema.enum),
         "example": schema_example(schema, name=parameter.name),
     }
+    if wire_name and wire_name != parameter.name:
+        payload["template"] = parameter.name
+    if isinstance(schema.format, str):
+        payload["format"] = schema.format
+    if isinstance(typetext, str) and typetext:
+        payload["typetext"] = typetext
+    return payload
 
 
 def method_payload(
@@ -274,15 +283,20 @@ def method_payload(
                     "example": path_param_example(name) or name,
                 }
             )
-    body_fields = [
+    contract_body_fields = [
         _parameter_payload(parameter)
         for parameter in method.parameters
         if parameter.name not in path_params and "[n]" not in parameter.name
     ]
+    # Contract uses foo[n]; the wire form is foo0..fooN — seed the console with foo0.
     indexed_fields = [
-        _parameter_payload(parameter) for parameter in method.parameters if "[n]" in parameter.name
+        _parameter_payload(parameter, wire_name=wire_param_name(parameter.name))
+        for parameter in method.parameters
+        if "[n]" in parameter.name
     ]
     body_example = _body_example(method, path_params)
+    # Flatten nested scalars from body_example (and nested field examples) into PARAMS.
+    body_fields = _body_fields_with_nested(contract_body_fields, body_example)
     resolved_path = _resolve_path(path, path_fields)
     implemented = (
         (path, method.verb.upper()) in implemented_methods
@@ -316,19 +330,131 @@ def _resolve_path(path: str, path_fields: list[dict[str, object]]) -> str:
 
 
 def _body_example(method: Method, path_params: tuple[str, ...]) -> dict[str, object]:
+    """Minimal request body: required parameters only, Proxmox wire names/values."""
+
     body: dict[str, object] = {}
     for parameter in method.parameters:
         if parameter.name in path_params:
             continue
-        if "[n]" in parameter.name:
-            concrete = parameter.name.replace("[n]", "0")
-            if not parameter.definition.optional:
-                body[concrete] = schema_example(parameter.definition, name=concrete)
-            continue
         if parameter.definition.optional:
             continue
-        body[parameter.name] = schema_example(parameter.definition, name=parameter.name)
+        wire = wire_param_name(parameter.name)
+        body[wire] = schema_example(parameter.definition, name=parameter.name)
     return body
+
+
+def _leaf_type(value: object) -> str:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    return "string"
+
+
+def _body_fields_from_example(body_example: dict[str, object] | None) -> list[dict[str, object]]:
+    """PARAM inputs derived from body_example, including nested scalar paths."""
+
+    if not isinstance(body_example, dict) or not body_example:
+        return []
+    inner: object = body_example
+    # Soft unwrap a single root object envelope (Engine-style), never a scalar/list.
+    if len(body_example) == 1:
+        only = next(iter(body_example.values()))
+        if isinstance(only, dict):
+            inner = only
+    if not isinstance(inner, dict):
+        return []
+
+    fields: list[dict[str, object]] = []
+
+    def _walk(prefix: str, value: object) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                path = f"{prefix}.{key}" if prefix else str(key)
+                _walk(path, child)
+            return
+        if isinstance(value, list):
+            for index, child in enumerate(value):
+                path = f"{prefix}.{index}" if prefix else str(index)
+                _walk(path, child)
+            return
+        fields.append(
+            {
+                "name": prefix,
+                "type": _leaf_type(value),
+                "description": prefix,
+                "optional": True,
+                "enum": [],
+                "example": value,
+            }
+        )
+
+    _walk("", inner)
+    return fields
+
+
+def _body_fields_with_nested(
+    contract_fields: list[dict[str, object]],
+    body_example: dict[str, object],
+) -> list[dict[str, object]]:
+    """Merge contract PARAMS with nested scalar paths from body_example."""
+
+    example_fields = _body_fields_from_example(body_example)
+    nested_tops = {
+        str(item["name"]).split(".", 1)[0] for item in example_fields if "." in str(item["name"])
+    }
+    contract_by_name = {str(item["name"]): item for item in contract_fields}
+    merged: list[dict[str, object]] = []
+    seen: set[str] = set()
+
+    for item in example_fields:
+        name = str(item["name"])
+        top = name.split(".", 1)[0]
+        parent = contract_by_name.get(name) or contract_by_name.get(top)
+        row = dict(item)
+        if parent is not None:
+            row["optional"] = bool(parent.get("optional"))
+            description = parent.get("description")
+            if isinstance(description, str) and description:
+                row["description"] = description
+            typetext = parent.get("typetext")
+            if isinstance(typetext, str) and typetext:
+                row["typetext"] = typetext
+            fmt = parent.get("format")
+            if isinstance(fmt, str) and fmt:
+                row["format"] = fmt
+        else:
+            # body_example is required-only — treat uncovered leaves as required.
+            row["optional"] = False
+        merged.append(row)
+        seen.add(name)
+
+    for field in contract_fields:
+        name = str(field["name"])
+        if name in nested_tops or name in seen:
+            continue
+        example = field.get("example")
+        if isinstance(example, dict | list):
+            nested = _body_fields_from_example({name: example})
+            if nested:
+                for item in nested:
+                    nested_name = str(item["name"])
+                    if nested_name in seen:
+                        continue
+                    row = dict(item)
+                    row["optional"] = bool(field.get("optional"))
+                    description = field.get("description")
+                    if isinstance(description, str) and description:
+                        row["description"] = description
+                    merged.append(row)
+                    seen.add(nested_name)
+                continue
+            # Empty object/array examples stay as a top-level PARAM.
+        merged.append(field)
+        seen.add(name)
+    return merged
 
 
 @lru_cache(maxsize=1)
