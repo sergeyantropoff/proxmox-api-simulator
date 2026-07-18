@@ -1,3 +1,5 @@
+**Language / Язык:** [English](faq.md) | [Русский](ru/faq.md)
+
 # FAQ
 
 ## Is this a real Proxmox hypervisor?
@@ -14,7 +16,9 @@ See [API versions](api-versions.md) and [Compatibility](compatibility.md).
 ## Can I use this in CI for Terraform / Ansible / custom clients?
 
 Yes. That is a primary use case. Pin the API major, seed a profile, and point
-clients at HTTP `:8006` or HTTPS `:8007`. See [Clients](clients.md).
+clients at **HTTP `:8006`** (Compose) or your Ingress **HTTPS** hostname on
+Kubernetes. See [Clients](clients.md). For the
+Pulumi surface suite see [`pulumi-tests/`](../pulumi-tests/README.md).
 
 ## Why do some OpenID / LDAP / ACME / Ceph calls “succeed” without remotes?
 
@@ -40,4 +44,16 @@ Hub image. Ingress + cert-manager Let's Encrypt is supported — see
 
 ## Which node name does the small seed use?
 
-`pve01`.
+`pve01`. Profiles `medium` and `ha-demo` use **`pve1` / `pve2` / `pve3`**.
+
+## What ports does real Proxmox VE use vs this simulator?
+
+Real PVE serves the Web UI and REST API on **HTTPS `:8006`** only. Related
+management ports include SPICE `:3128`, VNC `:5900–5999`, SSH `:22`, and
+Corosync UDP `:5405–5412`. Port `:8007` on real hardware is typically
+**Proxmox Backup Server**, not PVE.
+
+This lab publishes plain **HTTP `:8006`** in Compose (same port number as real
+PVE). HTTPS belongs on Kubernetes Ingress. Optional proxmoxer TLS:
+`docker compose --profile tls` on `:8443`. Host `:8007` is **not** used. Details:
+[Ports and TLS](configuration.md#ports-and-tls).

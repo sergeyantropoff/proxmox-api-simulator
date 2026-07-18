@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 
-BASE = os.environ.get("PVE_BASE", "http://localhost:8006/api2/json")
+BASE = os.environ.get("PVE_BASE", "https://localhost:8006/api2/json")
 NODE = os.environ.get("PVE_NODE", "pve01")
 VMID = int(os.environ.get("PVE_VMID", "111"))
 TOKEN = os.environ.get(

@@ -1,3 +1,5 @@
+**Language / Язык:** [English](clients.md) | [Русский](ru/clients.md)
+
 # Clients
 
 Use the simulator from common automation stacks. Each cookbook aims for the
@@ -13,39 +15,28 @@ same laboratory flow where the tool allows it:
 
 ## Connection matrix
 
-| Stack | Transport | Notes | Docs | Code |
+Real Proxmox VE clients talk to **HTTPS `:8006`**. This lab’s Compose stack
+publishes plain **HTTP `:8006`** (same port number). HTTPS belongs on
+**Kubernetes Ingress** (cert-manager). Clients that cannot speak HTTP
+(proxmoxer) use the optional profile: `docker compose --profile tls` →
+`https://localhost:8443/` (see [Ports and TLS](configuration.md#ports-and-tls)).
+
+| Stack | Compose transport | Notes | Docs | Code |
 |---|---|---|---|---|
-| Python (proxmoxer) | HTTPS `:8007` | Unmodified library; `verify_ssl=False` for local cert | [guide](examples/python-proxmoxer.md) | [`examples/python`](../examples/python) |
+| Python (proxmoxer) | HTTPS `:8443` (`--profile tls`) | HTTPS-only library; `verify_ssl=False` for lab cert | [guide](examples/python-proxmoxer.md) | [`examples/python`](../examples/python) |
 | Python (requests) | HTTP `:8006` | Raw `/api2/json` | [guide](examples/python-requests.md) | [`examples/python`](../examples/python) |
 | Go | HTTP `:8006` | stdlib `net/http` | [guide](examples/go.md) | [`examples/go`](../examples/go) |
 | Java | HTTP `:8006` | Java 11+ `HttpClient` | [guide](examples/java.md) | [`examples/java`](../examples/java) |
 | Perl | HTTP `:8006` | `HTTP::Tiny` + JSON | [guide](examples/perl.md) | [`examples/perl`](../examples/perl) |
 | Ansible | HTTP `:8006` | `uri` module cookbook | [guide](examples/ansible.md) | [`examples/ansible`](../examples/ansible) |
-| Terraform | HTTPS `:8007` | Provider + insecure TLS for local gateway | [guide](examples/terraform.md) | [`examples/terraform`](../examples/terraform) |
-| Pulumi | HTTPS `:8007` | Python program against the API | [guide](examples/pulumi.md) | [`examples/pulumi`](../examples/pulumi) |
+| Terraform | HTTP `:8006` (or TLS `:8443`) | Prefer HTTP; use `insecure` only with `--profile tls` | [guide](examples/terraform.md) | [`examples/terraform`](../examples/terraform) |
+| Pulumi | HTTP `:8006` | `pulumi-proxmoxve` or HTTP cookbooks | [guide](examples/pulumi.md) | [`examples/pulumi`](../examples/pulumi) |
 
-Shared prerequisites: [examples overview](examples/overview.md).
+On Kubernetes with Ingress + cert-manager, point every client at
+`https://<your-host>/` instead.
 
-## Credentials (seed)
+## More
 
-| Use | Value |
-|---|---|
-| User | `root@pam` |
-| Password | `secret` |
-| Token | `root@pam!automation=automation-secret` |
-| Default node (`small`) | `pve01` |
-
-## API major
-
-Pin the major before long runs:
-
-- Cold start: `CONTRACT_SNAPSHOT`
-- Runtime: Web UI apply or `POST /ui/api/contract/apply?major=N`
-
-Confirm with `GET /api2/json/version`. Coverage is **100%** for declared methods
-on majors 6–9.
-
-## Troubleshooting clients
-
-See [troubleshooting-clients](examples/troubleshooting-clients.md) and the
-global [Troubleshooting](troubleshooting.md) guide.
+- Cookbooks index: [examples/overview.md](examples/overview.md)
+- Troubleshooting: [examples/troubleshooting-clients.md](examples/troubleshooting-clients.md)
+- Pulumi full suite: [`pulumi-tests/`](../pulumi-tests/README.md)

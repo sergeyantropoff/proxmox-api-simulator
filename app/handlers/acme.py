@@ -10,39 +10,32 @@ from app.api.errors import ApiError
 from app.api.registry import HandlerRegistry
 from app.handlers.common import cluster_metadata, save_cluster_metadata, subdirs, values
 
-_DEFAULT_DIRECTORIES = [
-    {
-        "name": "Let's Encrypt V2",
-        "url": "https://acme-v02.api.letsencrypt.org/directory",
-    },
-    {
-        "name": "Let's Encrypt V2 Staging",
-        "url": "https://acme-staging-v02.api.letsencrypt.org/directory",
-    },
-]
-
-_CHALLENGE_SCHEMA = [
-    {
-        "id": "dns",
-        "name": "DNS plugin",
-        "type": "dns",
-        "fields": [{"name": "api", "type": "string"}],
-    }
-]
-
 
 def _acme(metadata: dict[str, Any]) -> dict[str, Any]:
-    current = metadata.setdefault(
-        "acme",
-        {"accounts": {}, "plugins": {}, "meta": {}},
-    )
+    current = metadata.get("acme")
     if not isinstance(current, dict):
-        current = {"accounts": {}, "plugins": {}, "meta": {}}
+        current = {}
         metadata["acme"] = current
-    current.setdefault("accounts", {})
-    current.setdefault("plugins", {})
-    current.setdefault("meta", {})
+    if not isinstance(current.get("accounts"), dict):
+        current["accounts"] = {}
+    if not isinstance(current.get("plugins"), dict):
+        current["plugins"] = {}
+    if not isinstance(current.get("meta"), dict):
+        current["meta"] = {}
+    if not isinstance(current.get("directories"), list):
+        current["directories"] = []
+    if not isinstance(current.get("challenge_schema"), list):
+        current["challenge_schema"] = []
     return current
+
+
+def _default_directory(acme: dict[str, Any]) -> str:
+    directories = acme.get("directories")
+    if isinstance(directories, list):
+        for item in directories:
+            if isinstance(item, dict) and item.get("url"):
+                return str(item["url"])
+    return ""
 
 
 def register_acme_handlers(registry: HandlerRegistry) -> None:
@@ -72,16 +65,17 @@ def register_acme_handlers(registry: HandlerRegistry) -> None:
         payload = values(inputs)
         name = str(payload.get("name") or "default")
         metadata = await cluster_metadata(request)
-        accounts = _acme(metadata)["accounts"]
+        acme = _acme(metadata)
+        accounts = acme["accounts"]
         if name in accounts:
             raise ApiError(400, f"ACME account '{name}' already exists")
+        directory = str(payload.get("directory") or _default_directory(acme))
         accounts[name] = {
             "name": name,
             "contact": payload.get("contact"),
-            "directory": payload.get("directory") or _DEFAULT_DIRECTORIES[0]["url"],
+            "directory": directory,
             "tos_url": payload.get("tos_url"),
             "eab-kid": payload.get("eab-kid"),
-            # eab-hmac-key stored but never returned
             "eab-hmac-key": payload.get("eab-hmac-key"),
             "location": f"https://acme.example.local/acct/{name}",
         }
@@ -181,29 +175,33 @@ def register_acme_handlers(registry: HandlerRegistry) -> None:
         del plugins[plugin_id]
         await save_cluster_metadata(request, metadata)
 
-    async def directories(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        return list(_DEFAULT_DIRECTORIES)
+    async def directories(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        metadata = await cluster_metadata(request)
+        directories = _acme(metadata).get("directories")
+        if isinstance(directories, list):
+            return [dict(item) for item in directories if isinstance(item, dict)]
+        return []
 
-    async def challenge_schema(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        return list(_CHALLENGE_SCHEMA)
+    async def challenge_schema(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        metadata = await cluster_metadata(request)
+        schema = _acme(metadata).get("challenge_schema")
+        if isinstance(schema, list):
+            return [dict(item) for item in schema if isinstance(item, dict)]
+        return []
 
     async def meta(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
-        directory = str(values(inputs).get("directory") or _DEFAULT_DIRECTORIES[0]["url"])
         metadata = await cluster_metadata(request)
-        meta_store = _acme(metadata).setdefault("meta", {})
-        payload = meta_store.setdefault(
-            directory,
-            {
-                "termsOfService": f"{directory.rstrip('/')}/tos",
-                "caaIdentities": ["letsencrypt.org"],
-            },
-        )
-        await save_cluster_metadata(request, metadata)
+        acme = _acme(metadata)
+        directory = str(values(inputs).get("directory") or _default_directory(acme))
+        meta_raw = acme.get("meta")
+        meta_store: dict[str, Any] = dict(meta_raw) if isinstance(meta_raw, dict) else {}
+        payload = meta_store.get(directory)
+        if not isinstance(payload, dict):
+            return {}
         return dict(payload)
 
     async def tos(request: Request, inputs: dict[str, Any]) -> str:
-        directory = str(values(inputs).get("directory") or _DEFAULT_DIRECTORIES[0]["url"])
-        result = await meta(request, {"values": {"directory": directory}, "provided": frozenset()})
+        result = await meta(request, inputs)
         return str(result.get("termsOfService") or "")
 
     registry.register("/cluster/acme", "GET", index)

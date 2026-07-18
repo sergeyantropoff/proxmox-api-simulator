@@ -1,0 +1,22 @@
+FROM python:3.13-bookworm
+
+ARG PULUMI_VERSION=3.193.0
+ARG PULUMI_PROXMOXVE_VERSION=8.2.1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL https://get.pulumi.com | sh -s -- --version "${PULUMI_VERSION}" \
+    && ln -s /root/.pulumi/bin/pulumi /usr/local/bin/pulumi \
+    && pip install --no-cache-dir \
+        "httpx==0.28.1" \
+        "pulumi==${PULUMI_VERSION}" \
+        "pulumi-proxmoxve==${PULUMI_PROXMOXVE_VERSION}" \
+    && pulumi plugin install resource proxmoxve "${PULUMI_PROXMOXVE_VERSION}" \
+        --server github://api.github.com/muhlba91/pulumi-proxmoxve \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/pulumi-tests
+ENV PYTHONPATH=/workspace/pulumi-tests/pulumi:/workspace/pulumi-tests
+ENV PULUMI_CONFIG_PASSPHRASE=hx-test-passphrase
+
+CMD ["python", "pulumi/run_suite.py"]

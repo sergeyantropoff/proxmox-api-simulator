@@ -1,9 +1,23 @@
+**Language / Язык:** [English](kubernetes.md) | [Русский](ru/kubernetes.md)
+
 # Kubernetes / Helm
 
 Deploy the published Docker Hub runtime image with the chart in
 [`helm/proxmox-api-simulator`](../helm/proxmox-api-simulator).
 
 Image: [`inecs/proxmox-api-simulator`](https://hub.docker.com/r/inecs/proxmox-api-simulator)
+
+> **Laboratory / CI only.** Chart defaults include weak placeholder secrets.
+> Always override `secret.ticketSigningKey` and `postgresql.auth.password`
+> before any shared or Internet-facing install. See [SECURITY.md](../SECURITY.md).
+
+## Transport note (Compose vs Helm)
+
+| Path | Client URL |
+|---|---|
+| Local Compose (`docker-compose*.yml`) | **HTTP** `:8006` (simulator process) |
+| Helm Service / `kubectl port-forward` | **HTTP** `:8006` (simulator process; TLS terminates at Ingress if enabled) |
+| Helm Ingress + cert-manager | **HTTPS** on your hostname |
 
 ## Prerequisites
 
@@ -28,8 +42,8 @@ helm upgrade --install pve-sim ./helm/proxmox-api-simulator \
   -n proxmox-sim --create-namespace \
   -f ./helm/proxmox-api-simulator/values-ingress-example.yaml \
   --set certManager.email=you@example.com \
-  --set ingress.hosts[0].host=pve-sim.example.com \
-  --set ingress.tls[0].hosts[0]=pve-sim.example.com \
+  --set 'ingress.hosts[0].host=pve-sim.example.com' \
+  --set 'ingress.tls[0].hosts[0]=pve-sim.example.com' \
   --set secret.ticketSigningKey="$(openssl rand -hex 32)" \
   --set postgresql.auth.password="$(openssl rand -hex 16)"
 ```
@@ -68,9 +82,10 @@ helm upgrade --install pve-sim ./helm/proxmox-api-simulator \
   -f ./helm/proxmox-api-simulator/values-ingress-example.yaml \
   --set certManager.email=you@example.com \
   --set certManager.useStaging=true \
-  --set ingress.hosts[0].host=pve-sim.example.com \
-  --set ingress.tls[0].hosts[0]=pve-sim.example.com \
-  --set secret.ticketSigningKey="$(openssl rand -hex 32)"
+  --set 'ingress.hosts[0].host=pve-sim.example.com' \
+  --set 'ingress.tls[0].hosts[0]=pve-sim.example.com' \
+  --set secret.ticketSigningKey="$(openssl rand -hex 32)" \
+  --set postgresql.auth.password="$(openssl rand -hex 16)"
 ```
 
 Browsers will not trust the staging CA — use `curl -k` while testing. Flip
@@ -88,7 +103,8 @@ helm upgrade --install pve-sim ./helm/proxmox-api-simulator \
 kubectl -n proxmox-sim port-forward svc/pve-sim-proxmox-api-simulator 8006:8006
 ```
 
-Open http://127.0.0.1:8006/
+Open http://127.0.0.1:8006/ (plain HTTP — the chart does not ship the Compose
+TLS gateway; use Ingress for HTTPS).
 
 ## External PostgreSQL
 
@@ -130,6 +146,20 @@ certManager:
   createClusterIssuer: false
   issuerName: your-existing-issuer
 ```
+
+## Local chart validation
+
+From the repository root (requires Helm 3.14+):
+
+```bash
+make helm-lint
+make helm-template
+```
+
+`helm lint` should report 0 failures (an informational note that Chart.yaml has no
+`icon` is expected). `helm template` renders Deployment (with a migrate
+initContainer by default), Service, Secret, PostgreSQL StatefulSet, optional
+standalone migrate Job (`migrate.asJob`), seed Job, Ingress, and ClusterIssuers.
 
 ## Operations
 

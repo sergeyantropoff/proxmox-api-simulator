@@ -46,24 +46,31 @@ def register_cluster_handlers(registry: HandlerRegistry) -> None:
             "tasks",
         )
 
-    async def cluster_status(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        rows = await database(_request).pool.fetch(
+    async def cluster_status(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        from app.handlers.nodes import load_node_ops
+
+        rows = await database(request).pool.fetch(
             """SELECT id, name, status FROM nodes ORDER BY name"""
         )
+        metadata = await cluster_metadata(request)
+        quorate = metadata.get("quorate")
         result: list[dict[str, Any]] = []
         for index, row in enumerate(rows):
             online = str(row["status"]) == "online"
+            ops = await load_node_ops(request, str(row["name"]))
+            cluster_node = ops.get("cluster_status")
+            entry = dict(cluster_node) if isinstance(cluster_node, dict) else {}
             result.append(
                 {
                     "id": str(row["id"]),
                     "name": str(row["name"]),
-                    "nodeid": index,
+                    "nodeid": entry.get("nodeid", index),
                     "online": 1 if online else 0,
-                    "local": 1 if index == 0 else 0,
-                    "ip": f"10.32.{index // 254 + 1}.{index % 254 + 10}",
-                    "level": "c",
-                    "type": "node",
-                    "quorate": 1,
+                    "local": entry.get("local", 1 if index == 0 else 0),
+                    "ip": entry.get("ip") or ops.get("ip") or "",
+                    "level": entry.get("level", "c"),
+                    "type": entry.get("type", "node"),
+                    "quorate": entry.get("quorate", quorate if quorate is not None else 1),
                 }
             )
         return result
@@ -95,14 +102,8 @@ def register_cluster_handlers(registry: HandlerRegistry) -> None:
         metadata = state(row["metadata"]) if row is not None else {}
         options = metadata.get("options", {})
         if not isinstance(options, dict):
-            options = {}
-        return {
-            "keyboard": options.get("keyboard", "en-us"),
-            "email_from": options.get("email_from", "root@localhost"),
-            "http_proxy": options.get("http_proxy", ""),
-            "description": options.get("description", "Proxmox API emulator cluster"),
-            **options,
-        }
+            return {}
+        return dict(options)
 
     async def cluster_options_put(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         current = await cluster_options_get(request, inputs)

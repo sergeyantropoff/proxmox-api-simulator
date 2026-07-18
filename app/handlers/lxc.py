@@ -323,7 +323,7 @@ def register_lxc_handlers(registry: HandlerRegistry) -> None:
 
     async def migrate_preconditions(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         values = _values(inputs)
-        await _lxc_resource(request, str(values["node"]), str(values["vmid"]))
+        resource = await _lxc_resource(request, str(values["node"]), str(values["vmid"]))
         target = values.get("target")
         if target in {None, ""}:
             raise ApiError(400, "parameter 'target' is required")
@@ -333,7 +333,13 @@ def register_lxc_handlers(registry: HandlerRegistry) -> None:
         )
         if not exists:
             raise ApiError(404, "target node does not exist")
-        return {"local_disks": [], "local_resources": [], "running": False}
+        state = _state(resource["state"])
+        pre = state.get("migrate_preconditions")
+        payload = dict(pre) if isinstance(pre, dict) else {}
+        payload["running"] = str(state.get("status") or "") == "running"
+        payload.setdefault("local_disks", [])
+        payload.setdefault("local_resources", [])
+        return payload
 
     async def migrate(request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)

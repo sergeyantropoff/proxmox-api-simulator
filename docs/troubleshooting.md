@@ -1,3 +1,5 @@
+**Language / Язык:** [English](troubleshooting.md) | [Русский](ru/troubleshooting.md)
+
 # Troubleshooting
 
 ## Ready stays unavailable
@@ -34,10 +36,15 @@ Declared methods on majors **6–9** should have handlers. If you see 501:
 
 ## proxmoxer / TLS failures
 
-- Use host port **8007** (gateway), not 8006, for TLS clients.
-- Set `verify_ssl=False` **only** for the local self-signed cert.
-- Inside Compose, target `tls-gateway:8443`.
+- Compose default is plain **HTTP `:8006`**. proxmoxer is HTTPS-only — enable
+  `docker compose --profile tls` and use `https://localhost:8443/` with
+  `verify_ssl=False` for the lab self-signed cert.
+- Inside Compose, target `tls-gateway:8443` when the `tls` profile is on.
+- Host `:8007` is **not** used by this stack (on hardware it is usually PBS).
+- On Kubernetes, use your Ingress HTTPS hostname (cert-manager).
 - Seeded node name for `small` is `pve01`, not `pve1`.
+- Profiles `medium` / `ha-demo` use **`pve1` / `pve2` / `pve3`**.
+- Port map: [Ports and TLS](configuration.md#ports-and-tls).
 
 ## Terraform / Pulumi drift after reseed
 

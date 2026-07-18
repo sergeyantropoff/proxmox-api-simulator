@@ -1,3 +1,5 @@
+**Language / Язык:** [English](python-requests.md) | [Русский](../ru/examples/python-requests.md)
+
 # Python — requests
 
 Raw HTTP against `:8006` without proxmoxer.

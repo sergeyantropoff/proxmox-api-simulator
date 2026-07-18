@@ -1,5 +1,5 @@
 # Optional overrides — copy to terraform.tfvars if needed.
-# endpoint  = "https://localhost:8007"
+# endpoint  = "http://localhost:8006"
 # api_token = "root@pam!automation=automation-secret"
 # node_name = "pve01"
 # vmid      = 117

@@ -1,3 +1,5 @@
+**Language / Язык:** [English](api-surface.md) | [Русский](ru/api-surface.md)
+
 # API surface
 
 ## Request path
@@ -33,7 +35,8 @@ not part of the product contract. See the workspace durable-simulator rule.
 
 - Interactive FastAPI docs: `/docs`
 - Web UI method inspector: `/` → catalog → method
-- UI APIs: `/ui/api/catalog`, `/ui/api/method`, `/ui/api/compatibility`
+- UI APIs: `/ui/api/versions`, `/ui/api/catalog`, `/ui/api/method`,
+  `/ui/api/compatibility`, `/ui/api/contract/apply`, `/ui/api/demo/*`
 
 ## Compatibility endpoints
 

@@ -1,3 +1,5 @@
+**Language / Язык:** [English](getting-started.md) | [Русский](ru/getting-started.md)
+
 # Getting started
 
 Bring up a local laboratory cluster, authenticate, and exercise a first
@@ -17,15 +19,18 @@ Python toolchain for day-to-day use.
 |---|---|
 | [Published image](#1a-published-image-docker-hub) | Fastest lab using `inecs/proxmox-api-simulator` |
 | [Helm / Kubernetes](kubernetes.md) | Cluster install with Ingress + Let's Encrypt |
-| [Development checkout](#1b-development-checkout) | Contribute / bind-mount source / HTTPS gateway on `:8007` |
+| [Development checkout](#1b-development-checkout) | Contribute / bind-mount source / HTTP API on `:8006` |
 
 ## 1a. Published image (Docker Hub)
 
 Uses [`docker-compose.release.yml`](../docker-compose.release.yml) — PostgreSQL +
 runtime simulator from Hub. No source build required.
 
+> Laboratory / CI only — rotate `TICKET_SIGNING_KEY` and the DB password before
+> any shared or networked demo. See [SECURITY.md](../SECURITY.md).
+
 ```bash
-# from this repository, or download docker-compose.release.yml alone
+# from this repository (compose file + docker/tls/)
 docker compose -f docker-compose.release.yml pull
 docker compose -f docker-compose.release.yml up -d
 docker compose -f docker-compose.release.yml run --rm --entrypoint python \
@@ -47,7 +52,7 @@ make release-seed PROFILE=small
 
 | Host port | Service |
 |---|---|
-| `8006` | HTTP API + Web UI |
+| `8006` | HTTP API + Web UI (same port as real PVE; real PVE uses HTTPS) |
 | `5432` | PostgreSQL (localhost only) |
 
 Migrations run automatically via the `migrate` one-shot service.
@@ -65,17 +70,22 @@ Services:
 
 | Host port | Service |
 |---|---|
-| `8006` | HTTP API + Web UI |
-| `8007` | HTTPS nginx gateway → simulator |
+| `8006` | HTTP API + Web UI (same port as real PVE; real PVE uses HTTPS) |
 | `5432` | PostgreSQL (localhost only) |
+
+On real Proxmox VE the REST API is **only** `https://<host>:8006/api2/json/...`.
+The lab publishes plain **HTTP** on host `:8006`; see
+[Ports and TLS](configuration.md#ports-and-tls). Optional HTTPS for proxmoxer:
+`docker compose --profile tls` → `https://localhost:8443/`. Host `:8007` is
+**not** used (on hardware it is typically PBS, not PVE API).
 
 Migrations apply automatically before the simulator becomes ready.
 
 ## 2. Wait until ready
 
 ```bash
-curl http://localhost:8006/health/live
-curl http://localhost:8006/health/ready
+curl -sS http://localhost:8006/health/live
+curl -sS http://localhost:8006/health/ready
 ```
 
 `/health/ready` returns HTTP 503 until PostgreSQL is reachable **and** the
@@ -94,7 +104,7 @@ local storages, and the standard development principals. See
 ## 4. Check the API version
 
 ```bash
-curl -s http://localhost:8006/api2/json/version | jq .
+curl -sS http://localhost:8006/api2/json/version | jq .
 ```
 
 The cold-start contract defaults to the bundled PVE **9.2.3** snapshot in Docker
@@ -104,7 +114,7 @@ Compose. Switch majors 6–9 from the Web UI or
 ## 5. Authenticate
 
 ```bash
-curl -s -X POST \
+curl -sS -X POST \
   -d 'username=root@pam&password=secret' \
   http://localhost:8006/api2/json/access/ticket | jq .
 ```
@@ -120,10 +130,10 @@ Details: [Authentication](authentication.md).
 
 ```bash
 # replace TICKET / CSRF from the previous response
-curl -s -H "Cookie: PVEAuthCookie=$TICKET" \
+curl -sS -H "Cookie: PVEAuthCookie=$TICKET" \
   http://localhost:8006/api2/json/nodes/pve01/qemu | jq .
 
-curl -s -X POST \
+curl -sS -X POST \
   -H "Cookie: PVEAuthCookie=$TICKET" \
   -H "CSRFPreventionToken: $CSRF" \
   http://localhost:8006/api2/json/nodes/pve01/qemu/100/status/start | jq .
@@ -132,7 +142,7 @@ curl -s -X POST \
 Async operations return a UPID string. Poll until the task finishes:
 
 ```bash
-curl -s -H "Cookie: PVEAuthCookie=$TICKET" \
+curl -sS -H "Cookie: PVEAuthCookie=$TICKET" \
   "http://localhost:8006/api2/json/nodes/pve01/tasks/${UPID}/status" | jq .
 ```
 

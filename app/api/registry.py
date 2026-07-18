@@ -17,7 +17,7 @@ from app.api.errors import ApiError, ContractValidationError
 from app.api.openapi import contract_openapi_tags
 from app.config import Settings
 from app.contracts.examples import schema_example
-from app.contracts.model import Method, Schema, Snapshot
+from app.contracts.model import Method, Parameter, Schema, Snapshot
 from app.db.pool import AsyncpgDatabase
 from app.security.acl import AclEntry, CapabilityRequirement, authorize, requirement_from_contract
 from app.security.auth import parse_api_token, verify_csrf, verify_secret, verify_ticket
@@ -134,6 +134,64 @@ def register_legacy_handler_routes(
             require_handler=True,
             allow_existing=True,
         )
+    return seen
+
+
+_PATH_PARAM_RE = re.compile(r"\{([^{}]+)\}")
+
+
+def _unbound_method(path: str, verb: str) -> Method:
+    """Minimal contract method so handler-only paths can be mounted."""
+
+    parameters = tuple(
+        Parameter(name=name, definition=Schema(type="string", optional=True))
+        for name in _PATH_PARAM_RE.findall(path)
+    )
+    return Method(
+        verb=verb.upper(),
+        name=f"unbound-{verb.lower()}-{path}",
+        description="Handler-backed route not present in the active contract snapshot",
+        parameters=parameters,
+        returns=Schema(),
+        permissions=None,
+        checksum="0" * 64,
+    )
+
+
+def register_unbound_handler_routes(
+    app: FastAPI,
+    handlers: HandlerRegistry,
+    fallback: FallbackMode = "error",
+    *,
+    existing: set[tuple[str, str, str]] | None = None,
+) -> set[tuple[str, str, str]]:
+    """Mount semantic handlers that no cached contract currently declares.
+
+    Keeps DB-backed handlers reachable (no FastAPI 404) when Proxmox schema
+    omits a path that the simulator still implements.
+    """
+
+    seen = existing if existing is not None else set()
+    for path, verb in sorted(handlers.keys()):
+        for renderer in ("json", "extjs"):
+            route = f"/api2/{renderer}{path}"
+            key = (route, verb, renderer)
+            if key in seen:
+                continue
+            method = _unbound_method(path, verb)
+            seen.add(key)
+            app.add_api_route(
+                route,
+                _endpoint(path, method, renderer, handlers, fallback),
+                methods=[verb],
+                name=f"unbound:{renderer}:{verb}:{path}",
+                tags=cast(list[str | Enum], contract_openapi_tags(path, renderer)),
+                openapi_extra={
+                    "x-proxmox-method-checksum": method.checksum,
+                    "x-proxmox-implementation": "implemented",
+                    "x-proxmox-unbound-handler": True,
+                },
+            )
     return seen
 
 
@@ -302,8 +360,14 @@ async def _parse_inputs(request: Request, method: Method) -> dict[str, Any]:
             continue
         if name not in supplied:
             if definition.optional:
+                # Proxmox schema ``default`` is often UI documentation text (e.g.
+                # bwlimit default = "restore limit from datacenter…"), not a value
+                # to materialize. Only inject defaults that coerce to the type.
                 if definition.default is not None:
-                    parsed[name] = definition.default
+                    try:
+                        parsed[name] = _coerce(definition.default, definition)
+                    except (TypeError, ValueError):
+                        pass
                 continue
             errors[name] = "property is missing and it is not optional"
             continue

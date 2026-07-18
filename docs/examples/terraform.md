@@ -1,7 +1,9 @@
+**Language / Язык:** [English](terraform.md) | [Русский](../ru/examples/terraform.md)
+
 # Terraform
 
 Example uses a Proxmox provider pointed at the local HTTPS gateway
-(`https://localhost:8007`) with `insecure = true` for the development
+(`http://localhost:8006`) with `insecure = true` for the development
 certificate.
 
 ```bash

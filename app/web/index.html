@@ -26,22 +26,22 @@
       --muted: #5c6778;
       --accent: #ff8500;
       --accent-hover: #ff6a00;
-      --link: #1e88ff;
+      --link: #d97706;
       --ok: #22c55e;
       --ok-bg: #e6f8ed;
       --warn: #9a6700;
       --warn-bg: #fff8e6;
       --err: #b42318;
       --err-bg: #fdecea;
-      --info: #1e88ff;
-      --info-bg: #e8f2ff;
+      --info: #d97706;
+      --info-bg: #fff4e8;
       --debug: #5c6778;
       --debug-bg: #eef1f6;
       --surface-raised: #fafbfc;
       --surface-hover: #f3f5f8;
       --surface-toolbar: #f6f8fb;
       --surface-muted-hover: #eef1f6;
-      --surface-accent: #eef4ff;
+      --surface-accent: #fff4e8;
       --surface-danger: #fffafa;
       --border-strong: #c8d0db;
       --brand-ink: #0f1419;
@@ -50,14 +50,14 @@
       --brand-logo-bg: var(--overlay-head-bg);
       --brand-logo-border: var(--border-strong);
       --brand-subtle: #97a1b1;
-      --meta-desc-bg: #f4f7fb;
-      --meta-desc-border: #7eb6ff;
-      --meta-desc-text: #1e88ff;
+      --meta-desc-bg: #fff8f0;
+      --meta-desc-border: #ffb366;
+      --meta-desc-text: #c45a00;
       --overlay-head-bg: #eef1f6;
       --brand-accent: #ff8500;
       --brand-accent-hover: #ff6a00;
-      --panel-accent: #22c55e;
-      --panel-accent-hover: #16a34a;
+      --panel-accent: #ff8500;
+      --panel-accent-hover: #ff6a00;
       --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
       --sans: "Segoe UI", system-ui, sans-serif;
       --header-h: 52px;
@@ -74,22 +74,22 @@
       --muted: #b0bac8;
       --accent: #ff8a1f;
       --accent-hover: #ffaa55;
-      --link: #93c5fd;
+      --link: #ffb366;
       --ok: #86efac;
       --ok-bg: #1a3d28;
       --warn: #f0c866;
       --warn-bg: #3d3218;
       --err: #fca5a5;
       --err-bg: #3d2222;
-      --info: #93c5fd;
-      --info-bg: #1a2d4a;
+      --info: #ffb366;
+      --info-bg: #3d2a18;
       --debug: #b0bac8;
       --debug-bg: #283240;
       --surface-raised: #242e3d;
       --surface-hover: #2f3a4b;
       --surface-toolbar: #151c27;
       --surface-muted-hover: #2f3a4b;
-      --surface-accent: #1e3150;
+      --surface-accent: #3d2a18;
       --surface-danger: #3a2626;
       --brand-ink: #f2f5f9;
       --brand-logo-core: #ffffff;
@@ -97,14 +97,14 @@
       --brand-logo-bg: var(--overlay-head-bg);
       --brand-logo-border: var(--border-strong);
       --brand-subtle: #9aa8ba;
-      --meta-desc-bg: #1e2836;
-      --meta-desc-border: #3d5a85;
-      --meta-desc-text: #c8d8ef;
+      --meta-desc-bg: #2a2218;
+      --meta-desc-border: #8a5a28;
+      --meta-desc-text: #ffc078;
       --overlay-head-bg: #242e3d;
       --brand-accent: #ff8a1f;
       --brand-accent-hover: #ffaa55;
-      --panel-accent: #4ade80;
-      --panel-accent-hover: #86efac;
+      --panel-accent: #ff8a1f;
+      --panel-accent-hover: #ffaa55;
     }
 
     html[data-theme="dark"] .header-tool-btn {
@@ -537,7 +537,7 @@
     }
 
     .header-tool-btn.data-badge-btn.loaded .data-badge-dot {
-      background: var(--ok);
+      background: var(--brand-accent);
     }
 
     .help-demo-panel {
@@ -1124,7 +1124,7 @@
       grid-row: 1;
       display: grid;
       position: relative;
-      font-size: 15px;
+      font-size: 16.5px;
       font-weight: 700;
       letter-spacing: 0.07em;
       text-transform: uppercase;
@@ -1158,18 +1158,22 @@
     .workspace-brand-sub {
       grid-row: 2;
       display: block;
+      box-sizing: border-box;
       width: 100%;
+      max-width: 100%;
       min-width: 0;
-      font-size: 9.75px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      line-height: 1.2;
+      font-size: 7.75px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      line-height: 1.15;
       text-transform: uppercase;
-      color: var(--muted);
+      text-align: left;
+      color: var(--brand-subtle);
       white-space: nowrap;
-      text-align: justify;
-      text-align-last: justify;
-      word-spacing: 0;
+    }
+
+    html[data-theme="dark"] .workspace-brand-sub {
+      color: var(--border-strong);
     }
 
     .workspace-topbar-actions {
@@ -1769,6 +1773,7 @@
     .data-drawer,
     .url-drawer,
     .endpoints-drawer,
+    .upid-drawer,
     .help-drawer,
     .ui-modal {
       --accent: var(--panel-accent);
@@ -1783,6 +1788,7 @@
     .data-drawer-head,
     .url-drawer-head,
     .endpoints-drawer-head,
+    .upid-drawer-head,
     .help-drawer-head {
       display: flex;
       align-items: center;
@@ -1803,6 +1809,7 @@
     .data-drawer-head h2,
     .url-drawer-head h2,
     .endpoints-drawer-head h2,
+    .upid-drawer-head h2,
     .help-drawer-head h2 {
       margin: 0;
       font-size: 11px;
@@ -1828,6 +1835,7 @@
     .catalog-drawer-head .icon-btn,
     .environment-drawer-head .icon-btn,
     .data-drawer-head .icon-btn,
+    .upid-drawer-head .icon-btn,
     .url-drawer-head .icon-btn,
     .endpoints-drawer-head .icon-btn,
     .help-drawer-head .icon-btn {
@@ -1842,6 +1850,7 @@
     .catalog-drawer-head .icon-btn:hover,
     .environment-drawer-head .icon-btn:hover,
     .data-drawer-head .icon-btn:hover,
+    .upid-drawer-head .icon-btn:hover,
     .url-drawer-head .icon-btn:hover,
     .endpoints-drawer-head .icon-btn:hover,
     .help-drawer-head .icon-btn:hover {
@@ -1869,6 +1878,7 @@
     .catalog-backdrop,
     .environment-backdrop,
     .data-backdrop,
+    .upid-backdrop,
     .url-backdrop,
     .endpoints-backdrop,
     .help-backdrop {
@@ -1887,6 +1897,7 @@
     .catalog-backdrop.open,
     .environment-backdrop.open,
     .data-backdrop.open,
+    .upid-backdrop.open,
     .url-backdrop.open,
     .endpoints-backdrop.open,
     .help-backdrop.open {
@@ -1900,6 +1911,7 @@
     .catalog-drawer,
     .environment-drawer,
     .data-drawer,
+    .upid-drawer,
     .url-drawer,
     .endpoints-drawer,
     .help-drawer {
@@ -1926,6 +1938,7 @@
     .catalog-drawer.open,
     .environment-drawer.open,
     .data-drawer.open,
+    .upid-drawer.open,
     .url-drawer.open,
     .endpoints-drawer.open,
     .help-drawer.open {
@@ -1938,6 +1951,7 @@
     .auth-drawer-body,
     .environment-drawer-body,
     .data-drawer-body,
+    .upid-drawer-body,
     .url-drawer-body,
     .endpoints-drawer-body,
     .help-drawer-body {
@@ -1959,6 +1973,7 @@
     .catalog-drawer-body .btn,
     .environment-drawer-body .btn,
     .data-drawer-body .btn,
+    .upid-drawer-body .btn,
     .url-drawer-body .btn,
     .endpoints-drawer-body .btn,
     .help-drawer-body .btn,
@@ -1971,6 +1986,80 @@
       padding: 0 16px;
       font-size: 13px;
       line-height: 1.2;
+    }
+
+    .upid-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .upid-hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .upid-hint code {
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .upid-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .upid-form .field label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .upid-form .field input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-raised);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .upid-form .field input:focus {
+      outline: none;
+      border-color: var(--brand-accent);
+    }
+
+    .upid-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .upid-output {
+      margin: 0;
+      min-height: 220px;
+      max-height: min(55vh, 520px);
+      overflow: auto;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-raised);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
     .help-drawer-body {
@@ -3173,7 +3262,7 @@
                 <span class="workspace-brand-name-ghost" aria-hidden="true">PROXMOX</span>
                 <span class="workspace-brand-name-text"><span class="workspace-brand-core">PRO</span><span class="workspace-brand-x">X</span><span class="workspace-brand-core">MO</span><span class="workspace-brand-x">X</span></span>
               </span>
-              <span class="workspace-brand-sub">API&nbsp;Simulator</span>
+              <span class="workspace-brand-sub">API Simulator</span>
             </span>
           </a>
           <div class="workspace-topbar-actions">
@@ -3188,6 +3277,7 @@
                 <span>History</span>
                 <span class="history-badge-count" id="history-badge-count"></span>
               </button>
+              <button type="button" class="header-tool-btn ok upid-badge-btn" id="upid-badge" aria-expanded="false" aria-controls="upid-drawer" data-tooltip="Poll task status and logs by UPID">UPID</button>
               <button type="button" class="header-tool-btn ok data-badge-btn" id="data-badge" aria-expanded="false" aria-controls="data-drawer">
                 <span>Data</span>
                 <span class="data-badge-dot" aria-hidden="true"></span>
@@ -3427,6 +3517,42 @@
     <div class="data-drawer-body">
       <div class="data-panel" id="data-panel">
         <div class="help-panel-loading">Loading demo state…</div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="upid-backdrop" id="upid-backdrop" aria-hidden="true"></div>
+  <aside class="upid-drawer" id="upid-drawer" aria-labelledby="upid-drawer-title" aria-hidden="true">
+    <div class="upid-drawer-head">
+      <h2 id="upid-drawer-title">UPID</h2>
+      <button class="icon-btn" id="upid-drawer-close" type="button" data-tooltip="Close panel" aria-label="Close panel">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="upid-drawer-body">
+      <div class="upid-panel">
+        <p class="upid-hint">
+          Async mutations return a Proxmox-style <strong>UPID</strong>. Poll
+          <code>/nodes/{node}/tasks/{upid}/status</code> until the task finishes, then inspect the log.
+        </p>
+        <div class="upid-form">
+          <div class="field">
+            <label for="upid-node">Node</label>
+            <input id="upid-node" value="pve01" spellcheck="false" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="upid-value">UPID</label>
+            <input id="upid-value" placeholder="UPID:pve01:… returned by a mutation" spellcheck="false" autocomplete="off">
+          </div>
+          <div class="upid-actions">
+            <button class="btn btn-primary btn-sm" id="btn-upid-status" type="button">Task status</button>
+            <button class="btn btn-sm" id="btn-upid-log" type="button">Task log</button>
+            <button class="btn btn-sm" id="btn-upid-from-response" type="button">From last response</button>
+          </div>
+        </div>
+        <pre class="upid-output" id="upid-output" aria-live="polite">Paste a UPID or send an async request, then poll status / log.</pre>
       </div>
     </div>
   </aside>
@@ -3699,6 +3825,7 @@
       history: readStoredHistory(),
       demoState: null,
       lastResponseRaw: "",
+      lastUpid: null,
     };
     let methodDetailsRequestId = 0;
 
@@ -3742,6 +3869,16 @@
       dataDrawer: document.getElementById("data-drawer"),
       dataDrawerClose: document.getElementById("data-drawer-close"),
       dataPanel: document.getElementById("data-panel"),
+      upidBadge: document.getElementById("upid-badge"),
+      upidBackdrop: document.getElementById("upid-backdrop"),
+      upidDrawer: document.getElementById("upid-drawer"),
+      upidDrawerClose: document.getElementById("upid-drawer-close"),
+      upidNode: document.getElementById("upid-node"),
+      upidValue: document.getElementById("upid-value"),
+      upidOutput: document.getElementById("upid-output"),
+      btnUpidStatus: document.getElementById("btn-upid-status"),
+      btnUpidLog: document.getElementById("btn-upid-log"),
+      btnUpidFromResponse: document.getElementById("btn-upid-from-response"),
       catalogImplFill: document.getElementById("catalog-impl-fill"),
       catalogImplValue: document.getElementById("catalog-impl-value"),
       endpointsBadge: document.getElementById("endpoints-badge"),
@@ -5114,6 +5251,124 @@
       toggleDataDrawer(false);
     }
 
+    function toggleUpidDrawer(force) {
+      if (!els.upidDrawer || !els.upidBackdrop || !els.upidBadge) return;
+      const open = typeof force === "boolean" ? force : !els.upidDrawer.classList.contains("open");
+      els.upidDrawer.classList.toggle("open", open);
+      els.upidBackdrop.classList.toggle("open", open);
+      els.upidBadge.setAttribute("aria-expanded", open ? "true" : "false");
+      els.upidDrawer.setAttribute("aria-hidden", open ? "false" : "true");
+      els.upidBackdrop.setAttribute("aria-hidden", open ? "false" : "true");
+      if (open && state.lastUpid && els.upidValue && !els.upidValue.value.trim()) {
+        applyCapturedUpid(state.lastUpid);
+      }
+    }
+
+    function closeUpidDrawer() {
+      toggleUpidDrawer(false);
+    }
+
+    function parseUpidNode(upid) {
+      const match = String(upid || "").match(/^UPID:([^:]+):/i);
+      return match ? match[1] : null;
+    }
+
+    function extractUpidFromPayload(payload) {
+      if (typeof payload === "string" && /^UPID:/i.test(payload.trim())) {
+        return payload.trim();
+      }
+      if (!payload || typeof payload !== "object") return null;
+      if (typeof payload.data === "string" && /^UPID:/i.test(payload.data.trim())) {
+        return payload.data.trim();
+      }
+      if (typeof payload.upid === "string" && /^UPID:/i.test(payload.upid.trim())) {
+        return payload.upid.trim();
+      }
+      if (payload.data && typeof payload.data === "object") {
+        if (typeof payload.data.upid === "string" && /^UPID:/i.test(payload.data.upid.trim())) {
+          return payload.data.upid.trim();
+        }
+      }
+      return null;
+    }
+
+    function applyCapturedUpid(upid) {
+      if (!upid || !els.upidValue) return false;
+      els.upidValue.value = upid;
+      const node = parseUpidNode(upid);
+      if (node && els.upidNode) els.upidNode.value = node;
+      return true;
+    }
+
+    function captureUpidFromResult(result) {
+      const upid = extractUpidFromPayload(result?.body);
+      if (!upid) return;
+      state.lastUpid = upid;
+      applyCapturedUpid(upid);
+      if (els.upidBadge) {
+        els.upidBadge.classList.remove("warn");
+        els.upidBadge.classList.add("ok");
+        els.upidBadge.dataset.tooltip = `Last UPID captured · ${upid}`;
+      }
+    }
+
+    function showUpidOutput(value) {
+      if (!els.upidOutput) return;
+      if (value !== null && typeof value === "object") {
+        els.upidOutput.textContent = JSON.stringify(value, null, 2);
+      } else {
+        els.upidOutput.textContent = String(value ?? "");
+      }
+    }
+
+    async function fetchUpidTask(kind) {
+      const node = (els.upidNode?.value || "").trim();
+      const upid = (els.upidValue?.value || "").trim();
+      if (!node) {
+        showUpidOutput("Node is required.");
+        toast("Enter a node name", "warn");
+        return;
+      }
+      if (!upid) {
+        showUpidOutput("UPID is required.");
+        toast("Enter a UPID", "warn");
+        return;
+      }
+      if (!state.ticket) {
+        toast("Sign in first — task endpoints require authentication", "warn");
+      }
+      const suffix = kind === "log" ? "log" : "status";
+      const path = `/nodes/${encodeURIComponent(node)}/tasks/${encodeURIComponent(upid)}/${suffix}`;
+      setLoading(true);
+      try {
+        const result = await api("GET", path);
+        showUpidOutput({ status: result.status, data: result.body });
+        const toastLevel = result.status >= 500 ? "error" : result.status >= 400 ? "warn" : "ok";
+        toast(`UPID ${suffix} · HTTP ${result.status}`, toastLevel);
+      } catch (error) {
+        showUpidOutput(String(error));
+        toast(`UPID ${suffix} failed`, "error");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function fillUpidFromLastResponse() {
+      const fromState = state.lastUpid || extractUpidFromPayload(
+        (() => {
+          try { return JSON.parse(state.lastResponseRaw); } catch { return state.lastResponseRaw; }
+        })(),
+      );
+      if (!fromState) {
+        toast("No UPID found in the last response", "warn");
+        showUpidOutput("Last response did not contain a UPID string in data.");
+        return;
+      }
+      applyCapturedUpid(fromState);
+      state.lastUpid = fromState;
+      toast("UPID loaded from last response", "ok");
+    }
+
     function buildDemoDataHtml(data) {
       const loaded = Boolean(data?.loaded);
       const cephPiB = data?.ceph_capacity_pib;
@@ -5399,7 +5654,7 @@
                   <path d="M11 6h2"/>
                 </svg>
               </a>
-              <a class="help-about-social-github" href="https://github.com/inecs" target="_blank" rel="noopener noreferrer" aria-label="GitHub" data-tooltip="github.com/inecs">
+              <a class="help-about-social-github" href="https://github.com/sergeyantropoff" target="_blank" rel="noopener noreferrer" aria-label="GitHub" data-tooltip="github.com/sergeyantropoff">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-3 .7-3.6-1.3-3.6-1.3-.5-1.1-1.1-1.4-1.1-1.4-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 3 .8.1-.7.4-1.1.7-1.4-2.4-.3-5-1.2-5-5.5a4.3 4.3 0 0 1 1.2-3 4.3 4.3 0 0 1 3.2-1.3c1.2 0 2.2.4 3 1a7.5 7.5 0 0 1 4.6-1.6c.5 0 1 .1 1.5.2a4.3 4.3 0 0 1 1.2 3c0 3.3-2.6 4.1-5 4.3-1.1.9-1 1.4-1 3.6v2.7c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/>
                 </svg>
@@ -5542,6 +5797,7 @@
       if (except !== "params") closeParamsDrawer();
       if (except !== "environment") closeEnvironmentDrawer();
       if (except !== "data") closeDataDrawer();
+      if (except !== "upid") closeUpidDrawer();
       if (except !== "url") closeUrlDrawer();
       if (except !== "endpoints") closeEndpointsDrawer();
       if (except !== "help") closeHelpDrawer();
@@ -6495,6 +6751,7 @@
       try {
         const result = await api(method, path.startsWith("/") ? path : `/${path}`, body);
         showResponse(result);
+        captureUpidFromResult(result);
         updateResolvedPath();
         pushHistory(
           method,
@@ -6647,6 +6904,11 @@
       closeOtherPanels("data");
       toggleDataDrawer(!els.dataDrawer.classList.contains("open"));
     });
+    els.upidBadge?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeOtherPanels("upid");
+      toggleUpidDrawer(!els.upidDrawer.classList.contains("open"));
+    });
     els.themeToggle.addEventListener("click", () => toggleTheme());
     els.helpBadge.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -6671,6 +6933,24 @@
     els.environmentBackdrop.addEventListener("click", () => closeEnvironmentDrawer());
     els.dataDrawerClose.addEventListener("click", () => closeDataDrawer());
     els.dataBackdrop.addEventListener("click", () => closeDataDrawer());
+    els.upidDrawerClose?.addEventListener("click", () => closeUpidDrawer());
+    els.upidBackdrop?.addEventListener("click", () => closeUpidDrawer());
+    els.btnUpidStatus?.addEventListener("click", () => {
+      fetchUpidTask("status").catch((error) => showError(String(error)));
+    });
+    els.btnUpidLog?.addEventListener("click", () => {
+      fetchUpidTask("log").catch((error) => showError(String(error)));
+    });
+    els.btnUpidFromResponse?.addEventListener("click", () => fillUpidFromLastResponse());
+    els.upidValue?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        fetchUpidTask("status").catch((error) => showError(String(error)));
+      }
+    });
+    els.upidValue?.addEventListener("input", () => {
+      const node = parseUpidNode(els.upidValue.value);
+      if (node && els.upidNode) els.upidNode.value = node;
+    });
     els.historyDrawerClose.addEventListener("click", () => closeHistoryDrawer());
     els.historyBackdrop.addEventListener("click", () => closeHistoryDrawer());
     els.historyClear.addEventListener("click", () => {

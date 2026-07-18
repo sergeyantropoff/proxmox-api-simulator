@@ -142,7 +142,7 @@ def register_ha_handlers(registry: HandlerRegistry) -> None:
     async def ha_groups(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
         metadata = await cluster_metadata(request)
         configured = _ha_groups(metadata)
-        result = [
+        return [
             {
                 "group": group_id,
                 "nodes": str(payload.get("nodes", "")),
@@ -152,26 +152,6 @@ def register_ha_handlers(registry: HandlerRegistry) -> None:
                 "comment": payload.get("comment", ""),
             }
             for group_id, payload in sorted(configured.items())
-        ]
-        if result:
-            return result
-        rows = await database(request).pool.fetch(
-            """SELECT DISTINCT state->>'group' AS group_id
-            FROM resources WHERE kind='ha' AND state ? 'group'
-            ORDER BY 1"""
-        )
-        node_names = await database(request).pool.fetch("SELECT name FROM nodes ORDER BY name")
-        nodes = ",".join(str(row["name"]) for row in node_names) or "pve01"
-        return [
-            {
-                "group": str(row["group_id"]),
-                "nodes": nodes,
-                "nofailback": 0,
-                "restricted": 0,
-                "type": "group",
-            }
-            for row in rows
-            if row["group_id"]
         ]
 
     async def ha_group_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -238,38 +218,39 @@ def register_ha_handlers(registry: HandlerRegistry) -> None:
             "SELECT name FROM nodes WHERE status='online' ORDER BY name LIMIT 1"
         )
         metadata = await cluster_metadata(request)
-        ha = metadata.get("ha", {}) if isinstance(metadata.get("ha"), dict) else {}
+        ha_raw = metadata.get("ha")
+        ha: dict[str, Any] = dict(ha_raw) if isinstance(ha_raw, dict) else {}
+        status_raw = ha.get("status_current")
+        status: dict[str, Any] = dict(status_raw) if isinstance(status_raw, dict) else {}
+        armed = bool(ha.get("armed")) if "armed" in ha else False
         return {
-            "quorate": 1,
-            "mode": "active" if ha.get("armed", True) else "disabled",
-            "master_node": str(master or "pve01"),
+            "quorate": status.get("quorate", metadata.get("quorate", 0)),
+            "mode": status.get("mode", "active" if armed else "disabled"),
+            "master_node": status.get("master_node", str(master or "")),
             "ha_started": int(row["started"] or 0),
             "ha_total": int(row["total"] or 0),
-            "armed": 1 if ha.get("armed", True) else 0,
+            "armed": 1 if armed else 0,
         }
 
     async def ha_manager_status(request: Request, _inputs: dict[str, Any]) -> dict[str, Any]:
         metadata = await cluster_metadata(request)
-        ha = metadata.get("ha", {}) if isinstance(metadata.get("ha"), dict) else {}
-        armed = bool(ha.get("armed", True))
+        ha_raw = metadata.get("ha")
+        ha: dict[str, Any] = dict(ha_raw) if isinstance(ha_raw, dict) else {}
+        manager_raw = ha.get("manager_status")
+        manager: dict[str, Any] = dict(manager_raw) if isinstance(manager_raw, dict) else {}
+        armed = bool(ha.get("armed")) if "armed" in ha else False
         return {
-            "manager_status": "active" if armed else "disabled",
-            "quorum": "OK",
+            "manager_status": manager.get("manager_status", "active" if armed else "disabled"),
+            "quorum": manager.get("quorum", ""),
             "armed": 1 if armed else 0,
         }
 
     async def ha_rules(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
         metadata = await cluster_metadata(request)
         rules = metadata.get("ha_rules")
-        if isinstance(rules, list) and rules:
+        if isinstance(rules, list):
             return [dict(item) for item in rules if isinstance(item, dict)]
-        defaults = [
-            {"rule": "node-fencing", "type": "node", "action": "restart"},
-            {"rule": "service-ha", "type": "resource", "action": "failover"},
-        ]
-        metadata["ha_rules"] = defaults
-        await save_cluster_metadata(request, metadata)
-        return list(defaults)
+        return []
 
     async def ha_relocate(request: Request, inputs: dict[str, Any]) -> None:
         payload = values(inputs)

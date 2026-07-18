@@ -1,3 +1,5 @@
+**Language / Язык:** [English](lxc.md) | [Русский](../ru/domains/lxc.md)
+
 # LXC
 
 Container APIs mirror the QEMU lifecycle patterns where the contract declares

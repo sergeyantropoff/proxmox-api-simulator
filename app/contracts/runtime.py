@@ -14,6 +14,7 @@ from app.api.registry import (
     HandlerRegistry,
     register_contract_routes,
     register_legacy_handler_routes,
+    register_unbound_handler_routes,
 )
 from app.compatibility import (
     CompatibilityDimension,
@@ -106,7 +107,7 @@ def apply_runtime_contract(
 
     clear_contract_routes(app)
     registered = register_contract_routes(app, snapshot, handlers, fallback)
-    register_legacy_handler_routes(
+    registered = register_legacy_handler_routes(
         app,
         handlers,
         store_root,
@@ -114,6 +115,7 @@ def apply_runtime_contract(
         primary_version=snapshot.source_version,
         existing=registered,
     )
+    register_unbound_handler_routes(app, handlers, fallback, existing=registered)
     report = build_compatibility_for_snapshot(
         snapshot,
         handlers,

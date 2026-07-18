@@ -1,3 +1,5 @@
+**Language / Язык:** [English](configuration.md) | [Русский](ru/configuration.md)
+
 # Configuration
 
 Application settings are loaded from the environment (see `.env.example`).
@@ -53,14 +55,41 @@ any accidental gap surfaces as HTTP 501.
 | `SEED_LARGE_NODES` | Node count for `large` |
 | `SEED_LARGE_RESOURCES` | Guest count for `large` (default 10 000) |
 | `TEST_DATABASE_URL` | Integration-test DSN |
-| `PROXMOXER_HOST` / `PROXMOXER_PORT` | Compatibility test client target (`tls-gateway` / `8443` in Compose) |
+| `PROXMOXER_HOST` / `PROXMOXER_PORT` | Compatibility test client target with `--profile tls` (`tls-gateway` / `8443`) |
 
 ## Ports and TLS
 
+### Real Proxmox VE (reference)
+
+On a physical / production PVE node the management API listens on **HTTPS
+`:8006`** (`/api2/json/...`). Related management ports (not separate REST APIs):
+
+| Port | Protocol | Role |
+|---|---|---|
+| `8006` | TCP, HTTPS | Web UI + REST API |
+| `3128` | TCP | SPICE proxy (graphical console) |
+| `5900–5999` | TCP (WebSocket) | VNC web console |
+| `22` | TCP | SSH / cluster actions |
+| `5405–5412` | UDP | Corosync cluster traffic |
+
+Port **`8007`** is **not** the PVE API — it is the usual Proxmox Backup Server
+(PBS) management port. Do not point PVE clients at `:8007` on real hardware.
+
+### Simulator lab endpoints
+
 | Endpoint | Use |
 |---|---|
-| `http://localhost:8006` | Direct HTTP (curl, browsers, most examples) |
-| `https://localhost:8007` | TLS gateway for TLS-assuming clients (proxmoxer, etc.) |
+| `http://localhost:8006` | Primary client URL — simulator (curl, browsers, requests, Terraform, …) |
+| `https://localhost:8443` | Optional — `docker compose --profile tls` for proxmoxer-style HTTPS-only clients |
+
+Compose publishes plain **HTTP on host `:8006`** (same port number as real PVE,
+which uses HTTPS). The simulator process speaks HTTP on `:8006` inside the Docker
+network as well. For Kubernetes, TLS terminates at Ingress (cert-manager). Host
+**`:8007` is not used** for the lab API (on real hardware that port is typically
+PBS, not PVE).
+
+Optional Compose TLS: `docker compose --profile tls` starts an nginx gateway on
+host `:8443` (requires `docker/tls/`). It proxies to `simulator:8006`.
 
 The checked-in certificate under `docker/tls/` is disposable development
 material. Never reuse it outside local labs. See [Security](security.md).

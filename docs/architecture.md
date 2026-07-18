@@ -1,3 +1,5 @@
+**Language / Язык:** [English](architecture.md) | [Русский](ru/architecture.md)
+
 # Architecture
 
 ## Goals
@@ -30,7 +32,7 @@ flowchart LR
     Obs["Logs / Prometheus / OpenTelemetry"]
 
     Client -->|"/api2/json"| API
-    Admin -->|"CLI and /_simulator"| API
+    Admin -->|"CLI, Make/Helm, Web UI /ui/api"| API
     Docs -->|"explicit import only"| Importer
     Importer --> Contract
     Contract --> DB

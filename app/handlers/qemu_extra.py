@@ -79,20 +79,10 @@ def register_qemu_extra_handlers(registry: HandlerRegistry) -> None:
     async def _agent_blob(command: str, request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         resource = await _agent_resource(request, _values(inputs))
         state = _state(resource["state"])
-        agent = state.setdefault("agent", {})
-        blobs = agent.setdefault("results", {})
-        defaults: dict[str, Any] = {
-            "get-users": [{"user": "root", "login-time": 0}],
-            "get-fsinfo": [{"name": "/", "type": "ext4", "total-bytes": 32 * 1024**3}],
-            "get-memory-block-info": {"size": 1024**3},
-            "get-memory-blocks": [{"start": 0, "size": 1024**3}],
-            "get-timezone": {"zone": "UTC", "offset": 0},
-            "get-vcpus": [{"online": True, "can-offline": False}],
-            "fsfreeze-status": "thawed",
-        }
-        if command not in blobs:
-            blobs[command] = defaults.get(command, {})
-            await _save_guest_state(request, resource["id"], state)
+        agent = state.get("agent")
+        blobs = agent.get("results") if isinstance(agent, dict) else None
+        if not isinstance(blobs, dict) or command not in blobs:
+            raise ApiError(404, f"agent command '{command}' has no stored result")
         return {"result": blobs[command]}
 
     async def agent_users(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -146,10 +136,10 @@ def register_qemu_extra_handlers(registry: HandlerRegistry) -> None:
         resource = await _agent_resource(request, payload)
         path = str(payload.get("file") or payload.get("path") or "/etc/hostname")
         state = _state(resource["state"])
-        files = state.setdefault("agent", {}).setdefault("files", {})
-        if path not in files:
-            files[path] = f"simulated:{path}\n"
-            await _save_guest_state(request, resource["id"], state)
+        agent = state.get("agent")
+        files = agent.get("files") if isinstance(agent, dict) else None
+        if not isinstance(files, dict) or path not in files:
+            raise ApiError(404, "file does not exist")
         content = str(files[path])
         return {"result": {"content": content, "truncated": True}}
 
@@ -188,9 +178,15 @@ def register_qemu_extra_handlers(registry: HandlerRegistry) -> None:
     async def agent_fstrim(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         resource = await _agent_resource(request, _values(inputs))
         state = _state(resource["state"])
-        state.setdefault("agent", {})["last_fstrim"] = True
+        agent = dict(state.get("agent") or {})
+        agent["last_fstrim"] = True
+        state["agent"] = agent
         await _save_guest_state(request, resource["id"], state)
-        return {"result": {"paths": [{"path": "/", "trimmed": 0}]}}
+        results = agent.get("results") if isinstance(agent.get("results"), dict) else {}
+        fstrim = results.get("fstrim") if isinstance(results, dict) else None
+        if isinstance(fstrim, dict):
+            return {"result": fstrim}
+        return {"result": {}}
 
     async def agent_set_password(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         payload = _values(inputs)
@@ -258,45 +254,23 @@ def register_qemu_extra_handlers(registry: HandlerRegistry) -> None:
     async def cloudinit_dump(request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)
         resource = await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
-        config = _state(resource["config"])
-        return (
-            f"#cloud-config\nhostname: {config.get('name', values['vmid'])}\n"
-            f"manage_etc_hosts: true\n"
-        )
+        state = _state(resource["state"])
+        dump = state.get("cloudinit_dump")
+        return str(dump) if dump is not None else ""
 
     async def rrd(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         values = _values(inputs)
         resource = await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
         state = _state(resource["state"])
-        rrd_state = state.setdefault("rrd", {"filename": f"pve-vm-{values['vmid']}.rrd"})
-        await _save_guest_state(request, resource["id"], state)
-        return dict(rrd_state)
+        rrd_state = state.get("rrd")
+        return dict(rrd_state) if isinstance(rrd_state, dict) else {}
 
     async def rrddata(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         values = _values(inputs)
         resource = await _qemu_resource(request, str(values["node"]), str(values["vmid"]))
         state = _state(resource["state"])
-        series = state.setdefault(
-            "rrddata",
-            [
-                {
-                    "time": 1_700_000_000,
-                    "cpu": 0.05,
-                    "mem": 256 * 1024 * 1024,
-                    "netin": 0,
-                    "netout": 0,
-                },
-                {
-                    "time": 1_700_000_060,
-                    "cpu": 0.08,
-                    "mem": 260 * 1024 * 1024,
-                    "netin": 100,
-                    "netout": 80,
-                },
-            ],
-        )
-        await _save_guest_state(request, resource["id"], state)
-        return list(series)
+        series = state.get("rrddata")
+        return [dict(item) for item in series] if isinstance(series, list) else []
 
     async def monitor(request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)

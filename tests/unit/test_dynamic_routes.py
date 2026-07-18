@@ -5,11 +5,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import Request
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-from app.api.registry import HandlerRegistry, RouteCollisionError
+from app.api.registry import (
+    HandlerRegistry,
+    RouteCollisionError,
+    register_unbound_handler_routes,
+)
 from app.config import Settings
 from app.contracts.model import Method, PathContract, Schema, Snapshot
 from app.main import create_app
@@ -97,3 +101,21 @@ def test_duplicate_semantic_handlers_are_rejected() -> None:
     handlers.register("/version", "GET", handler)
     with pytest.raises(RouteCollisionError, match="duplicate"):
         handlers.register("/version", "GET", handler)
+
+
+def test_unbound_handler_routes_are_mounted() -> None:
+    app = FastAPI()
+    handlers = HandlerRegistry()
+
+    async def firewall_log(_request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        return [{"n": 0, "msg": "from-db"}]
+
+    handlers.register("/cluster/firewall/log", "GET", firewall_log)
+    register_unbound_handler_routes(app, handlers, "error")
+
+    routes = {
+        (getattr(route, "path", None), tuple(sorted(getattr(route, "methods", set()) or set())))
+        for route in app.routes
+    }
+    assert ("/api2/json/cluster/firewall/log", ("GET",)) in routes
+    assert ("/api2/extjs/cluster/firewall/log", ("GET",)) in routes

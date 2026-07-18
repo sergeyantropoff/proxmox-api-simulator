@@ -1,3 +1,5 @@
+**Language / Язык:** [English](README.md) | [Русский](README.ru.md)
+
 # Runnable client cookbooks
 
 Companion code for [docs/clients.md](../docs/clients.md).

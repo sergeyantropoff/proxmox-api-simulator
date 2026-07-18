@@ -1,3 +1,5 @@
+**Language / Язык:** [English](access.md) | [Русский](../ru/domains/access.md)
+
 # Access
 
 Durable identity and authorization: users, groups, roles, ACL entries, realms,

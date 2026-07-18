@@ -1,3 +1,5 @@
+**Language / Язык:** [English](java.md) | [Русский](../ru/examples/java.md)
+
 # Java
 
 Java 11+ `HttpClient` cookbook using API-token auth against `:8006`.

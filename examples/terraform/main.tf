@@ -16,8 +16,8 @@ provider "proxmox" {
 
 variable "endpoint" {
   type        = string
-  description = "Simulator HTTPS gateway, e.g. https://localhost:8007"
-  default     = "https://localhost:8007"
+  description = "Simulator HTTPS gateway, e.g. https://localhost:8006"
+  default     = "https://localhost:8006"
 }
 
 variable "api_token" {

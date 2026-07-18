@@ -1,3 +1,5 @@
+**Language / Язык:** [English](compatibility.md) | [Русский](ru/compatibility.md)
+
 # Compatibility
 
 This document explains how the simulator claims compatibility with Proxmox VE

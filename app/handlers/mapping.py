@@ -12,13 +12,14 @@ from app.handlers.common import cluster_metadata, save_cluster_metadata, subdirs
 
 
 def _mappings(metadata: dict[str, Any]) -> dict[str, Any]:
-    current = metadata.setdefault("mapping", {"dir": {}, "pci": {}, "usb": {}})
+    current = metadata.get("mapping")
     if not isinstance(current, dict):
-        current = {"dir": {}, "pci": {}, "usb": {}}
-        metadata["mapping"] = current
-    for kind in ("dir", "pci", "usb"):
-        current.setdefault(kind, {})
-    return current
+        return {"dir": {}, "pci": {}, "usb": {}}
+    return {
+        "dir": dict(current["dir"]) if isinstance(current.get("dir"), dict) else {},
+        "pci": dict(current["pci"]) if isinstance(current.get("pci"), dict) else {},
+        "usb": dict(current["usb"]) if isinstance(current.get("usb"), dict) else {},
+    }
 
 
 def register_mapping_handlers(registry: HandlerRegistry) -> None:
@@ -42,12 +43,14 @@ def register_mapping_handlers(registry: HandlerRegistry) -> None:
             payload = values(inputs)
             item_id = str(payload["id"])
             metadata = await cluster_metadata(request)
-            store = _mappings(metadata)[kind]
+            mapping = _mappings(metadata)
+            store = mapping[kind]
             if item_id in store:
                 raise ApiError(400, f"{kind} mapping '{item_id}' already exists")
             store[item_id] = {
                 key: value for key, value in payload.items() if key not in {"delete", "digest"}
             }
+            metadata["mapping"] = mapping
             await save_cluster_metadata(request, metadata)
 
         async def get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -62,7 +65,8 @@ def register_mapping_handlers(registry: HandlerRegistry) -> None:
             payload = values(inputs)
             item_id = str(payload["id"])
             metadata = await cluster_metadata(request)
-            store = _mappings(metadata)[kind]
+            mapping = _mappings(metadata)
+            store = mapping[kind]
             if item_id not in store:
                 raise ApiError(404, f"{kind} mapping does not exist")
             current = dict(store[item_id])
@@ -76,15 +80,18 @@ def register_mapping_handlers(registry: HandlerRegistry) -> None:
                 current[key] = value
             current["id"] = item_id
             store[item_id] = current
+            metadata["mapping"] = mapping
             await save_cluster_metadata(request, metadata)
 
         async def delete(request: Request, inputs: dict[str, Any]) -> None:
             item_id = str(values(inputs)["id"])
             metadata = await cluster_metadata(request)
-            store = _mappings(metadata)[kind]
+            mapping = _mappings(metadata)
+            store = mapping[kind]
             if item_id not in store:
                 raise ApiError(404, f"{kind} mapping does not exist")
             del store[item_id]
+            metadata["mapping"] = mapping
             await save_cluster_metadata(request, metadata)
 
         registry.register(base, "GET", list_items)

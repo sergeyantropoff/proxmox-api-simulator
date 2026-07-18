@@ -1,9 +1,17 @@
+**Language / Язык:** [English](README.md) | [Русский](README.ru.md)
+
 # Helm chart: proxmox-api-simulator
 
 Deploys the published runtime image
 [`inecs/proxmox-api-simulator`](https://hub.docker.com/r/inecs/proxmox-api-simulator)
-with optional Bitnami PostgreSQL, migrations, seed Job, Ingress, and
+with optional official PostgreSQL (`postgres:17.5-bookworm`), migrations, seed Job, Ingress, and
 cert-manager Let's Encrypt `ClusterIssuer` resources.
+
+> **Laboratory / CI only.** Chart defaults include weak placeholder secrets
+> (`change-me…`, DB password `proxmox`). Always override
+> `secret.ticketSigningKey` and `postgresql.auth.password` (as in the install
+> example below) before any networked or shared cluster. See
+> [SECURITY.md](../../SECURITY.md).
 
 Full guide: [docs/kubernetes.md](../../docs/kubernetes.md).
 

@@ -1,10 +1,16 @@
 """Deterministic seed profile tests."""
 
+from typing import Any, cast
+
 import pytest
 
 from app.simulation.seed import (
     build_profile,
     clear_simulation_state,
+    cluster_domain_metadata,
+    default_node_ops_for_seed,
+    enrich_guest_state,
+    enrich_storage_state,
     large_profile,
     small_profile,
     stable_id,
@@ -99,6 +105,70 @@ def test_minimal_profile() -> None:
 def test_stable_ids_are_namespaced_and_repeatable() -> None:
     assert stable_id("qemu:100") == stable_id("qemu:100")
     assert stable_id("qemu:100") != stable_id("qemu:101")
+
+
+def test_cluster_domain_metadata_seeds_list_domains() -> None:
+    meta = cast(dict[str, Any], cluster_domain_metadata(small_profile()))
+    assert meta["firewall"]["scopes"]["cluster"]["rules"]
+    assert meta["firewall"]["scopes"]["cluster"]["aliases"]
+    assert meta["firewall"]["scopes"]["cluster"]["ipset"]
+    assert meta["firewall"]["scopes"]["cluster"]["groups"]
+    assert meta["firewall"]["scopes"]["node:pve01"]["rules"]
+    assert meta["firewall"]["scopes"]["qemu:pve01:100"]["rules"]
+    assert meta["firewall"]["scopes"]["lxc:pve01:200"]["rules"]
+    assert meta["firewall_macros"]
+    assert meta["sdn"]["zones"]
+    assert meta["sdn"]["vnets"]
+    assert meta["sdn"]["controllers"]
+    assert meta["sdn"]["ipams"]
+    assert meta["sdn"]["dns"]
+    assert meta["notifications"]["endpoints"]["smtp"]
+    assert meta["notifications"]["endpoints"]["gotify"]
+    assert meta["notifications"]["matchers"]
+    assert meta["notifications"]["matcher_fields"]
+    assert meta["acme"]["accounts"]
+    assert meta["acme"]["plugins"]
+    assert meta["acme"]["directories"]
+    assert meta["acme"]["challenge_schema"]
+    assert meta["mapping"]["pci"]
+    assert meta["mapping"]["usb"]
+    assert meta["mapping"]["dir"]
+    assert meta["replication"]
+    assert meta["metrics"]["servers"]
+    assert meta["ha_groups"]
+    assert meta["ceph"]["pools"]
+    assert meta["ceph"]["flags"]
+    assert meta["ceph"]["version"]
+    assert meta["qemu_cpu_flags"]
+    assert meta["metrics"]["export_data"]
+    assert meta["jobs"]["schedule_analyze_results"]
+    assert meta["replication"][0]["log"]
+    ops = cast(dict[str, Any], default_node_ops_for_seed("pve01"))
+    assert ops["capabilities"]["cpu"]
+    assert ops["capabilities"]["machines"]
+    assert ops["hosts"]["data"]
+    assert ops["journal"]
+    assert ops["syslog"]
+    assert ops["netstat"]
+    assert ops["rrddata"]
+    assert ops["status"]["uptime"]
+    assert ops["ip"]
+    assert meta["cluster_config"]["totem"]
+    assert meta["quorate"] == 1
+    guest = cast(
+        dict[str, Any],
+        enrich_guest_state({"name": "demo", "status": "stopped"}, kind="qemu", vmid="100"),
+    )
+    assert guest["agent"]["results"]["info"]
+    assert guest["rrddata"]
+    assert guest["migrate_preconditions"]
+    storage = cast(
+        dict[str, Any],
+        enrich_storage_state({"total_bytes": 1000, "used_bytes": 100}, storage_id="local"),
+    )
+    assert storage["rrddata"]
+    assert storage["file_restore"]
+    assert storage["import_metadata"]
 
 
 @pytest.mark.asyncio

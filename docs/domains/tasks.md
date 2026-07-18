@@ -1,3 +1,5 @@
+**Language / Язык:** [English](tasks.md) | [Русский](../ru/domains/tasks.md)
+
 # Tasks
 
 Long-running operations return a Proxmox-style **UPID**. Task rows, events,

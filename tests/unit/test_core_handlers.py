@@ -21,7 +21,9 @@ class FakePool:
                 "name": "root@pam",
                 "password_hash": hash_secret("secret", salt=b"pve-simulator-v1"),
             }
-        if "FROM nodes" in sql and args[0] == "pve1":
+        if "FROM nodes" in sql and "metadata" in sql and args and args[0] == "pve1":
+            return {"metadata": '{"ops":{"status":{"uptime":100}}}'}
+        if "FROM nodes" in sql and args and args[0] == "pve1":
             return {"name": "pve1", "status": "online"}
         if "FROM resources r" in sql and args == ("pve1", "100"):
             if "SELECT r.id" in sql:
@@ -196,7 +198,12 @@ async def test_core_login_and_read_endpoints(
     assert version.json()["data"]["release"] == "test"
     assert nodes.json()["data"][0]["node"] == "pve1"
     assert status.json()["data"]["status"] == "online"
-    assert resources.json()["data"][0]["type"] == "qemu"
+    resource_types = {item["type"] for item in resources.json()["data"]}
+    assert "qemu" in resource_types
+    qemu_resources = [item for item in resources.json()["data"] if item["type"] == "qemu"]
+    assert qemu_resources
+    assert isinstance(qemu_resources[0]["cpu"], int | float)
+    assert qemu_resources[0]["vmid"] == 100
     assert qemu.json()["data"][0]["vmid"] == 100
     assert config.json()["data"]["name"] == "demo"
     assert start.json()["data"].startswith("UPID:pve1:")

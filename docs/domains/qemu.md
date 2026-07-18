@@ -1,3 +1,5 @@
+**Language / Язык:** [English](qemu.md) | [Русский](../ru/domains/qemu.md)
+
 # QEMU
 
 Full contract surface for QEMU guests on the active major, including:

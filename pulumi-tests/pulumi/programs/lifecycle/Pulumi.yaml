@@ -1,0 +1,3 @@
+name: hx-lifecycle
+runtime: python
+description: Compact Proxmox simulator lifecycle scenarios

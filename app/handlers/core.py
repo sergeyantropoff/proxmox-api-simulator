@@ -68,44 +68,220 @@ def build_core_handlers(settings: Settings) -> HandlerRegistry:
         }
 
     async def nodes(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        from app.handlers.nodes import load_node_ops
+
         rows = await _database(request).pool.fetch(
             "SELECT name AS node, status FROM nodes ORDER BY name"
         )
-        return [{"node": str(row["node"]), "status": str(row["status"])} for row in rows]
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            name = str(row["node"])
+            ops = await load_node_ops(request, name)
+            status_payload = ops.get("status")
+            status_dict = dict(status_payload) if isinstance(status_payload, dict) else {}
+            fingerprint = status_dict.get("ssl_fingerprint") or status_dict.get("fingerprint")
+            if fingerprint in (None, "", 0) or isinstance(fingerprint, dict | list):
+                fingerprint = ":".join(["00"] * 32)
+
+            def _as_float(value: object, default: float) -> float:
+                if isinstance(value, bool) or value is None or isinstance(value, dict | list):
+                    return default
+                try:
+                    return float(str(value))
+                except (TypeError, ValueError):
+                    return default
+
+            def _as_int(value: object, default: int) -> int:
+                if isinstance(value, bool) or value is None or isinstance(value, dict | list):
+                    return default
+                try:
+                    return int(float(str(value)))
+                except (TypeError, ValueError):
+                    return default
+
+            item: dict[str, Any] = {
+                "node": name,
+                "status": str(row["status"]),
+                "type": "node",
+                "ssl_fingerprint": str(fingerprint),
+                "cpu": _as_float(status_dict.get("cpu"), 0.0),
+                "maxcpu": _as_int(status_dict.get("maxcpu"), 4),
+                "mem": _as_int(status_dict.get("mem"), _as_int(status_dict.get("memory"), 0)),
+                "maxmem": _as_int(status_dict.get("maxmem"), 8 * 1024**3),
+                "uptime": _as_int(status_dict.get("uptime"), 0),
+                "level": str(status_dict.get("level") or ""),
+            }
+            result.append(item)
+        return result
 
     async def node_status(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        from app.handlers.nodes import load_node_ops
+
         node = str(cast(dict[str, Any], inputs["values"])["node"])
         row = await _database(request).pool.fetchrow(
             "SELECT name, status FROM nodes WHERE name=$1", node
         )
         if row is None:
             raise ApiError(404, "node does not exist")
+        ops = await load_node_ops(request, node)
+        status = ops.get("status")
+        payload = dict(status) if isinstance(status, dict) else {}
         return {
             "status": str(row["status"]),
             "node": str(row["name"]),
-            "uptime": 0,
-            "cpu": 0.0,
-            "memory": {"used": 0, "total": 0},
+            **payload,
         }
 
-    async def resources(request: Request, _inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        rows = await _database(request).pool.fetch(
-            """SELECT r.kind AS type, r.external_id, r.state, n.name AS node
-            FROM resources r JOIN nodes n ON n.id=r.node_id
-            ORDER BY r.kind, r.external_id"""
-        )
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            raw_state = row["state"]
-            state = json.loads(raw_state) if isinstance(raw_state, str) else dict(raw_state)
-            result.append(
-                {
-                    "type": str(row["type"]),
-                    "id": f"{row['type']}/{row['external_id']}",
-                    "node": str(row["node"]),
-                    **state,
-                }
+    async def resources(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        """Cluster-wide inventory in Proxmox ``/cluster/resources`` shape.
+
+        Do not dump guest ``state`` / config blobs: QEMU ``cpu`` is a model
+        string (e.g. ``qemu64``), while this endpoint's ``cpu`` is utilization
+        (float). Bridged clients (bpg / pulumi-proxmoxve) decode strictly.
+        """
+
+        def _as_dict(raw: object) -> dict[str, Any]:
+            if isinstance(raw, str):
+                loaded = json.loads(raw)
+                return dict(loaded) if isinstance(loaded, dict) else {}
+            return dict(raw) if isinstance(raw, dict) else {}
+
+        def _num(value: object, default: float | int) -> float | int:
+            if isinstance(value, bool) or value is None or isinstance(value, dict | list):
+                return default
+            try:
+                if isinstance(default, float):
+                    return float(str(value))
+                return int(float(str(value)))
+            except (TypeError, ValueError):
+                return default
+
+        def _memory_bytes(state: dict[str, Any]) -> int:
+            raw = state.get("maxmem", state.get("memory"))
+            if raw in (None, ""):
+                return 0
+            value = _num(raw, 0)
+            # QEMU config stores memory in MiB; cluster resources use bytes.
+            if isinstance(raw, str) or (isinstance(value, int) and 0 < value < 10_000_000):
+                return int(value) * 1024 * 1024
+            return int(value)
+
+        def _maxcpu(state: dict[str, Any]) -> int:
+            cores = int(_num(state.get("cores", state.get("cpus", 1)), 1))
+            sockets = int(_num(state.get("sockets", 1), 1))
+            return max(cores * sockets, 1)
+
+        def _cpu_util(state: dict[str, Any], *, running: bool) -> float:
+            if not running:
+                return 0.0
+            samples = state.get("rrddata")
+            if isinstance(samples, list) and samples:
+                last = samples[-1]
+                if isinstance(last, dict):
+                    return float(_num(last.get("cpu"), 0.0))
+            return (
+                float(_num(state.get("cpu"), 0.0)) if not isinstance(state.get("cpu"), str) else 0.0
             )
+
+        type_filter = cast(dict[str, Any], inputs.get("values") or {}).get("type")
+        result: list[dict[str, Any]] = []
+
+        if type_filter in (None, "node"):
+            node_rows = await _database(request).pool.fetch(
+                "SELECT name AS node, status FROM nodes ORDER BY name"
+            )
+            from app.handlers.nodes import load_node_ops
+
+            for row in node_rows:
+                name = str(row["node"])
+                ops = await load_node_ops(request, name)
+                status_payload = ops.get("status")
+                status_dict = dict(status_payload) if isinstance(status_payload, dict) else {}
+                result.append(
+                    {
+                        "type": "node",
+                        "id": f"node/{name}",
+                        "node": name,
+                        "status": str(row["status"]),
+                        "cpu": float(_num(status_dict.get("cpu"), 0.0)),
+                        "maxcpu": int(_num(status_dict.get("maxcpu"), 4)),
+                        "mem": int(
+                            _num(status_dict.get("mem"), _num(status_dict.get("memory"), 0))
+                        ),
+                        "maxmem": int(_num(status_dict.get("maxmem"), 8 * 1024**3)),
+                        "uptime": int(_num(status_dict.get("uptime"), 0)),
+                        "level": str(status_dict.get("level") or ""),
+                    }
+                )
+
+        kind_filter: tuple[str, ...] | None
+        if type_filter == "vm":
+            kind_filter = ("qemu", "lxc")
+        elif type_filter == "storage":
+            kind_filter = ("storage",)
+        elif type_filter in (None,):
+            kind_filter = ("qemu", "lxc", "storage")
+        elif type_filter in {"qemu", "lxc", "storage", "pool", "sdn"}:
+            kind_filter = (str(type_filter),)
+        else:
+            kind_filter = ()
+
+        if kind_filter:
+            rows = await _database(request).pool.fetch(
+                """SELECT r.kind AS type, r.external_id, r.state, n.name AS node
+                FROM resources r JOIN nodes n ON n.id=r.node_id
+                WHERE r.kind = ANY($1::text[])
+                ORDER BY r.kind, r.external_id""",
+                list(kind_filter),
+            )
+            for row in rows:
+                kind = str(row["type"])
+                external_id = str(row["external_id"])
+                node = str(row["node"])
+                state = _as_dict(row["state"])
+                if kind in {"qemu", "lxc"}:
+                    status = str(state.get("status") or "stopped")
+                    running = status in {"running", "paused"}
+                    vmid = int(external_id)
+                    item: dict[str, Any] = {
+                        "type": kind,
+                        "id": f"{kind}/{external_id}",
+                        "node": node,
+                        "vmid": vmid,
+                        "name": str(state.get("name") or f"{kind}-{external_id}"),
+                        "status": status,
+                        "template": 1 if state.get("template") in {True, "1"} else 0,
+                        "cpu": _cpu_util(state, running=running),
+                        "maxcpu": _maxcpu(state),
+                        "mem": int(_num(state.get("mem"), 0)) if running else 0,
+                        "maxmem": _memory_bytes(state),
+                        "disk": int(_num(state.get("disk"), 0)),
+                        "maxdisk": int(_num(state.get("maxdisk"), 0)),
+                        "uptime": int(_num(state.get("uptime"), 0)) if running else 0,
+                    }
+                    result.append(item)
+                elif kind == "storage":
+                    content = state.get("content")
+                    if isinstance(content, list):
+                        content_text = ",".join(str(item) for item in content)
+                    else:
+                        content_text = str(content or "")
+                    result.append(
+                        {
+                            "type": "storage",
+                            "id": f"storage/{node}/{external_id}",
+                            "node": node,
+                            "storage": external_id,
+                            "status": str(state.get("status") or "available"),
+                            "content": content_text,
+                            "disk": int(_num(state.get("disk"), 0)),
+                            "maxdisk": int(_num(state.get("maxdisk"), 1 * 1024**3)),
+                            "shared": int(_num(state.get("shared"), 0)),
+                            "plugintype": str(
+                                state.get("plugintype") or state.get("type") or "dir"
+                            ),
+                        }
+                    )
         return result
 
     async def node_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:

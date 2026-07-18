@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import secrets
 import time
@@ -13,128 +12,49 @@ from fastapi import Request
 from app.api.errors import ApiError
 from app.api.registry import HandlerRegistry
 from app.handlers.common import database, require_node, subdirs, values
-from app.handlers.nodes import default_node_ops, load_node_ops, save_node_ops
+from app.handlers.nodes import load_node_ops, save_node_ops
 from app.tasks.repository import TaskRepository
 from app.tasks.upid import Upid
 
-DEFAULT_HARDWARE: dict[str, Any] = {
-    "pci": [
-        {
-            "id": "0000:00:1f.2",
-            "vendor_name": "Intel Corporation",
-            "device_name": "SATA Controller",
-            "iommugroup": 0,
-        },
-        {
-            "id": "0000:01:00.0",
-            "vendor_name": "NVIDIA Corporation",
-            "device_name": "GP102 [GeForce GTX 1080 Ti]",
-            "iommugroup": 1,
-            "mdev": 1,
-        },
-    ],
-    "usb": [
-        {"busnum": 1, "devnum": 1, "level": 0, "port": "1", "prodid": "0002", "vendid": "1d6b"},
-        {"busnum": 2, "devnum": 2, "level": 1, "port": "2", "prodid": "5591", "vendid": "0781"},
-    ],
-    "mdev": {
-        "0000:01:00.0": [
-            {"type": "nvidia-11", "available": 4, "description": "GRID profile"},
-        ]
-    },
-}
-
-DEFAULT_SCAN: dict[str, list[dict[str, Any]]] = {
-    "cifs": [{"server": "files.local", "share": "backups"}],
-    "iscsi": [{"portal": "10.0.0.50:3260", "target": "iqn.2024-01.local:storage"}],
-    "lvm": [{"vg": "pve", "size": 500_000_000_000, "free": 100_000_000_000}],
-    "lvmthin": [{"lv": "data", "vg": "pve", "lv_size": 400_000_000_000}],
-    "nfs": [{"server": "nfs.local", "path": "/export/pve", "options": "vers=4"}],
-    "pbs": [{"server": "pbs.local", "datastore": "store1"}],
-    "zfs": [{"pool": "rpool", "name": "rpool/data", "size": 800_000_000_000}],
-}
-
-DEFAULT_SUBSCRIPTION: dict[str, Any] = {
-    "status": "notfound",
-    "message": "There is no subscription key",
-    "serverid": "SIMULATOR",
-    "sockets": 1,
-    "productname": "Proxmox VE",
-    "url": "https://www.proxmox.com/en/proxmox-virtual-environment/pricing",
-}
-
-DEFAULT_CONFIG: dict[str, Any] = {
-    "description": "Simulator node",
-    "startall-onboot-delay": 0,
-    "wakeonlan": "",
-}
-
-DEFAULT_DNS: dict[str, Any] = {
-    "search": "local",
-    "dns1": "1.1.1.1",
-    "dns2": "8.8.8.8",
-    "dns3": "",
-}
-
-DEFAULT_TIME: dict[str, Any] = {
-    "timezone": "UTC",
-    "time": 0,
-    "localtime": 0,
-}
-
 
 def _certificates(ops: dict[str, Any]) -> dict[str, Any]:
-    certs = ops.setdefault(
-        "certificates",
-        {
-            "custom": None,
-            "acme": {"account": "default", "domains": [], "certificate": None},
-            "info": [],
-        },
-    )
+    certs = ops.get("certificates")
     if not isinstance(certs, dict):
-        certs = {"custom": None, "acme": {}, "info": []}
-        ops["certificates"] = certs
-    certs.setdefault("acme", {"account": "default", "domains": [], "certificate": None})
-    certs.setdefault("info", [])
+        return {"custom": None, "acme": {}, "info": []}
     return certs
 
 
 def _hardware(ops: dict[str, Any]) -> dict[str, Any]:
     hardware = ops.get("hardware")
-    if not isinstance(hardware, dict) or not hardware:
-        hardware = copy.deepcopy(DEFAULT_HARDWARE)
-        ops["hardware"] = hardware
-    hardware.setdefault("pci", copy.deepcopy(DEFAULT_HARDWARE["pci"]))
-    hardware.setdefault("usb", copy.deepcopy(DEFAULT_HARDWARE["usb"]))
-    hardware.setdefault("mdev", copy.deepcopy(DEFAULT_HARDWARE["mdev"]))
-    return hardware
+    if not isinstance(hardware, dict):
+        return {"pci": [], "usb": [], "mdev": {}}
+    return {
+        "pci": list(hardware.get("pci") or []) if isinstance(hardware.get("pci"), list) else [],
+        "usb": list(hardware.get("usb") or []) if isinstance(hardware.get("usb"), list) else [],
+        "mdev": dict(hardware.get("mdev") or {}) if isinstance(hardware.get("mdev"), dict) else {},
+    }
 
 
 def _scan_cache(ops: dict[str, Any]) -> dict[str, Any]:
     scan = ops.get("scan")
-    if not isinstance(scan, dict) or not scan:
-        scan = copy.deepcopy(DEFAULT_SCAN)
-        ops["scan"] = scan
-    for key, value in DEFAULT_SCAN.items():
-        scan.setdefault(key, copy.deepcopy(value))
+    if not isinstance(scan, dict):
+        return {}
     return scan
 
 
 def _subscription(ops: dict[str, Any]) -> dict[str, Any]:
     subscription = ops.get("subscription")
-    if not isinstance(subscription, dict) or not subscription:
-        subscription = copy.deepcopy(DEFAULT_SUBSCRIPTION)
-        ops["subscription"] = subscription
+    if not isinstance(subscription, dict):
+        return {}
     return subscription
 
 
 def _disk_items(ops: dict[str, Any], kind: str) -> list[dict[str, Any]]:
-    disks = ops.setdefault("disks", default_node_ops()["disks"])
+    disks = ops.get("disks")
     if not isinstance(disks, dict):
-        disks = default_node_ops()["disks"]
+        disks = {}
         ops["disks"] = disks
-    items = disks.setdefault(kind, [])
+    items = disks.get(kind)
     if not isinstance(items, list):
         items = []
         disks[kind] = items
@@ -208,7 +128,11 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         }
         entry["name"] = name
         items.append(entry)
-        ops.setdefault("disks", default_node_ops()["disks"])[kind] = items
+        disks = ops.get("disks")
+        if not isinstance(disks, dict):
+            disks = {}
+            ops["disks"] = disks
+        disks[kind] = items
         await save_node_ops(request, node, ops)
         return entry
 
@@ -360,35 +284,40 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         return subdirs("cpu", "cpu-flags", "machines", "migration")
 
     async def capabilities_cpu(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        await require_node(request, str(values(inputs)["node"]))
-        return [
-            {"name": "host", "vendor": "QEMU", "custom": 0},
-            {"name": "x86-64-v2-AES", "vendor": "QEMU", "custom": 0},
-            {"name": "kvm64", "vendor": "QEMU", "custom": 0},
-        ]
+        node = str(values(inputs)["node"])
+        await require_node(request, node)
+        ops = await load_node_ops(request, node)
+        caps = ops.get("capabilities")
+        items = caps.get("cpu") if isinstance(caps, dict) else None
+        return [dict(item) for item in items] if isinstance(items, list) else []
 
     async def capabilities_cpu_flags(
         request: Request, inputs: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        await require_node(request, str(values(inputs)["node"]))
-        return [
-            {"name": "aes", "introduces": "Westmere"},
-            {"name": "avx", "introduces": "SandyBridge"},
-            {"name": "avx2", "introduces": "Haswell"},
-        ]
+        node = str(values(inputs)["node"])
+        await require_node(request, node)
+        ops = await load_node_ops(request, node)
+        caps = ops.get("capabilities")
+        items = caps.get("cpu_flags") if isinstance(caps, dict) else None
+        return [dict(item) for item in items] if isinstance(items, list) else []
 
     async def capabilities_machines(
         request: Request, inputs: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        await require_node(request, str(values(inputs)["node"]))
-        return [
-            {"id": "pc-i440fx-9.0", "type": "i440fx", "version": "9.0"},
-            {"id": "pc-q35-9.0", "type": "q35", "version": "9.0"},
-        ]
+        node = str(values(inputs)["node"])
+        await require_node(request, node)
+        ops = await load_node_ops(request, node)
+        caps = ops.get("capabilities")
+        items = caps.get("machines") if isinstance(caps, dict) else None
+        return [dict(item) for item in items] if isinstance(items, list) else []
 
     async def capabilities_migration(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
-        await require_node(request, str(values(inputs)["node"]))
-        return {"network": "", "type": "secure", "enabled": 1}
+        node = str(values(inputs)["node"])
+        await require_node(request, node)
+        ops = await load_node_ops(request, node)
+        caps = ops.get("capabilities")
+        migration = caps.get("migration") if isinstance(caps, dict) else None
+        return dict(migration) if isinstance(migration, dict) else {}
 
     async def hardware_index(request: Request, inputs: dict[str, Any]) -> list[dict[str, str]]:
         await require_node(request, str(values(inputs)["node"]))
@@ -399,8 +328,6 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         await require_node(request, node)
         ops = await load_node_ops(request, node)
         hardware = _hardware(ops)
-        ops["hardware"] = hardware
-        await save_node_ops(request, node, ops)
         return [dict(item) for item in hardware.get("pci", [])]
 
     async def hardware_pci_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -430,8 +357,6 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         await require_node(request, node)
         ops = await load_node_ops(request, node)
         hardware = _hardware(ops)
-        ops["hardware"] = hardware
-        await save_node_ops(request, node, ops)
         return [dict(item) for item in hardware.get("usb", [])]
 
     async def subscription_get(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -452,7 +377,10 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         current = _subscription(ops)
         method = request.method.upper()
         if method == "DELETE":
-            ops["subscription"] = copy.deepcopy(DEFAULT_SUBSCRIPTION)
+            ops["subscription"] = {
+                "status": "notfound",
+                "message": "There is no subscription key",
+            }
             await save_node_ops(request, node, ops)
             return None
         if method == "POST":
@@ -481,17 +409,8 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         ops = await load_node_ops(request, node)
         items = ops.get("aplinfo")
         if not isinstance(items, list):
-            items = [
-                {
-                    "package": "alpine-3-standard",
-                    "section": "system",
-                    "type": "lxc",
-                    "version": "3.20",
-                }
-            ]
-            ops["aplinfo"] = items
-            await save_node_ops(request, node, ops)
-        return [dict(item) for item in items]
+            return []
+        return [dict(item) for item in items if isinstance(item, dict)]
 
     async def aplinfo_download(request: Request, inputs: dict[str, Any]) -> str:
         payload = values(inputs)
@@ -514,7 +433,10 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         node = str(payload["node"])
         await require_node(request, node)
         ops = await load_node_ops(request, node)
-        apt = ops.setdefault("apt", copy.deepcopy(default_node_ops()["apt"]))
+        apt = ops.get("apt")
+        if not isinstance(apt, dict):
+            apt = {}
+            ops["apt"] = apt
         repositories = list(apt.get("repositories") or [])
         method = request.method.upper()
         if method == "POST":
@@ -561,18 +483,14 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         await require_node(request, node)
         ops = await load_node_ops(request, node)
         config = ops.get("config")
-        if not isinstance(config, dict):
-            config = copy.deepcopy(DEFAULT_CONFIG)
-            ops["config"] = config
-            await save_node_ops(request, node, ops)
-        return dict(config)
+        return dict(config) if isinstance(config, dict) else {}
 
     async def node_config_put(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         payload = values(inputs)
         node = str(payload["node"])
         await require_node(request, node)
         ops = await load_node_ops(request, node)
-        config = dict(ops.get("config") or DEFAULT_CONFIG)
+        config = dict(ops.get("config") or {})
         config.update(
             {
                 key: value
@@ -589,18 +507,14 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         await require_node(request, node)
         ops = await load_node_ops(request, node)
         dns = ops.get("dns")
-        if not isinstance(dns, dict):
-            dns = copy.deepcopy(DEFAULT_DNS)
-            ops["dns"] = dns
-            await save_node_ops(request, node, ops)
-        return dict(dns)
+        return dict(dns) if isinstance(dns, dict) else {}
 
     async def dns_put(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         payload = values(inputs)
         node = str(payload["node"])
         await require_node(request, node)
         ops = await load_node_ops(request, node)
-        dns = dict(ops.get("dns") or DEFAULT_DNS)
+        dns = dict(ops.get("dns") or {})
         dns.update(
             {
                 key: value
@@ -616,13 +530,10 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         node = str(values(inputs)["node"])
         await require_node(request, node)
         ops = await load_node_ops(request, node)
-        current = dict(ops.get("time") or DEFAULT_TIME)
+        current = dict(ops.get("time") or {})
         now = int(time.time())
         current["time"] = now
         current["localtime"] = now
-        current.setdefault("timezone", "UTC")
-        ops["time"] = current
-        await save_node_ops(request, node, ops)
         return current
 
     async def time_put(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -630,7 +541,7 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         node = str(payload["node"])
         await require_node(request, node)
         ops = await load_node_ops(request, node)
-        current = dict(ops.get("time") or DEFAULT_TIME)
+        current = dict(ops.get("time") or {})
         if "timezone" in payload:
             current["timezone"] = str(payload["timezone"])
         now = int(time.time())
@@ -668,12 +579,7 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         ops = await load_node_ops(request, node)
         hosts = ops.get("hosts")
         if not isinstance(hosts, dict):
-            hosts = {
-                "data": f"127.0.0.1 localhost\n10.0.0.10 {node}\n",
-                "digest": secrets.token_hex(8),
-            }
-            ops["hosts"] = hosts
-            await save_node_ops(request, node, ops)
+            return {"data": "", "digest": ""}
         return {"data": str(hosts.get("data", "")), "digest": str(hosts.get("digest", ""))}
 
     async def hosts_post(request: Request, inputs: dict[str, Any]) -> None:
@@ -692,46 +598,50 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         await require_node(request, node)
         start = int(values(inputs).get("startcursor") or values(inputs).get("start") or 0)
         limit = int(values(inputs).get("limit") or 50)
-        lines = [
-            f"{index}: {node} systemd[1]: Started simulated service {index}."
-            for index in range(start, start + limit)
-        ]
-        return lines
+        ops = await load_node_ops(request, node)
+        lines = ops.get("journal")
+        if not isinstance(lines, list):
+            return []
+        sliced = lines[start : start + limit]
+        return [str(item) for item in sliced]
 
     async def syslog(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         node = str(values(inputs)["node"])
         await require_node(request, node)
         limit = int(values(inputs).get("limit") or 50)
-        return [
-            {"n": index, "t": f"{node} kernel: simulated syslog line {index}"}
-            for index in range(limit)
-        ]
+        ops = await load_node_ops(request, node)
+        lines = ops.get("syslog")
+        if not isinstance(lines, list):
+            return []
+        return [dict(item) for item in lines[:limit] if isinstance(item, dict)]
 
     async def netstat(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         node = str(values(inputs)["node"])
         await require_node(request, node)
-        return [
-            {"in": 1_000_000, "out": 900_000, "vnet": "vmbr0", "hwaddr": "bc:24:11:00:00:01"},
-            {"in": 500_000, "out": 450_000, "vnet": "vmbr1", "hwaddr": "bc:24:11:00:00:02"},
-        ]
+        ops = await load_node_ops(request, node)
+        items = ops.get("netstat")
+        return [dict(item) for item in items] if isinstance(items, list) else []
 
     async def report(request: Request, inputs: dict[str, Any]) -> str:
         node = str(values(inputs)["node"])
         await require_node(request, node)
-        return f"==== Proxmox node report for {node} ====\nuptime: simulated\n"
+        ops = await load_node_ops(request, node)
+        report_text = ops.get("report")
+        return str(report_text) if report_text is not None else ""
 
-    async def rrd(_request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
-        await require_node(_request, str(values(inputs)["node"]))
-        return {"filename": "/var/lib/rrdcached/db/pve-node.rrd"}
+    async def rrd(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
+        node = str(values(inputs)["node"])
+        await require_node(request, node)
+        ops = await load_node_ops(request, node)
+        rrd_state = ops.get("rrd")
+        return dict(rrd_state) if isinstance(rrd_state, dict) else {}
 
-    async def rrddata(_request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
-        await require_node(_request, str(values(inputs)["node"]))
-        now = int(time.time())
-        return [
-            {"time": now - 120, "cpu": 0.05, "memused": 1_000_000_000},
-            {"time": now - 60, "cpu": 0.07, "memused": 1_100_000_000},
-            {"time": now, "cpu": 0.04, "memused": 1_050_000_000},
-        ]
+    async def rrddata(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
+        node = str(values(inputs)["node"])
+        await require_node(request, node)
+        ops = await load_node_ops(request, node)
+        series = ops.get("rrddata")
+        return [dict(item) for item in series] if isinstance(series, list) else []
 
     async def startall(request: Request, inputs: dict[str, Any]) -> str:
         node = str(values(inputs)["node"])
@@ -809,7 +719,7 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         await require_node(request, node)
         ops = await load_node_ops(request, node)
         if not isinstance(ops.get("network"), list):
-            ops["network"] = copy.deepcopy(default_node_ops()["network"])
+            ops["network"] = []
         ops["network_applied"] = False
         await save_node_ops(request, node, ops)
 
@@ -818,28 +728,24 @@ def register_nodes_extra_handlers(registry: HandlerRegistry) -> None:
         await require_node(request, node)
         repo = str(values(inputs).get("repo") or "library/alpine")
         ops = await load_node_ops(request, node)
-        cache = ops.setdefault("oci_tags", {})
-        if repo not in cache:
-            cache[repo] = [{"tag": "latest"}, {"tag": "3.20"}]
-            ops["oci_tags"] = cache
-            await save_node_ops(request, node, ops)
-        return [dict(item) for item in cache[repo]]
+        cache = ops.get("oci_tags")
+        if not isinstance(cache, dict):
+            return []
+        items = cache.get(repo)
+        if not isinstance(items, list):
+            return []
+        return [dict(item) for item in items if isinstance(item, dict)]
 
     async def query_url_metadata(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         node = str(values(inputs)["node"])
         await require_node(request, node)
         url = str(values(inputs).get("url") or "")
         ops = await load_node_ops(request, node)
-        cache = ops.setdefault("url_metadata", {})
-        if url not in cache:
-            cache[url] = {
-                "filename": url.rsplit("/", 1)[-1] or "download.bin",
-                "mimetype": "application/octet-stream",
-                "size": 1024,
-            }
-            ops["url_metadata"] = cache
-            await save_node_ops(request, node, ops)
-        return dict(cache[url])
+        cache = ops.get("url_metadata")
+        if not isinstance(cache, dict):
+            return {}
+        payload = cache.get(url)
+        return dict(payload) if isinstance(payload, dict) else {}
 
     async def vncwebsocket(request: Request, inputs: dict[str, Any]) -> dict[str, Any]:
         node = str(values(inputs)["node"])

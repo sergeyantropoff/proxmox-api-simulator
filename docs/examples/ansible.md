@@ -1,3 +1,5 @@
+**Language / Язык:** [English](ansible.md) | [Русский](../ru/examples/ansible.md)
+
 # Ansible
 
 Playbook uses the `uri` module against HTTP `:8006` with token auth, then

@@ -10,7 +10,7 @@ from fastapi import Request
 
 from app.api.errors import ApiError
 from app.api.registry import HandlerRegistry
-from app.handlers.common import database, state, values
+from app.handlers.common import database, require_value, state, values
 from app.simulation.seed import CLUSTER_ID, stable_id
 
 
@@ -117,7 +117,7 @@ def register_pool_handlers(registry: HandlerRegistry) -> None:
             )
 
     async def pool_delete(request: Request, inputs: dict[str, Any]) -> None:
-        poolid = str(values(inputs)["poolid"])
+        poolid = str(require_value(values(inputs), "poolid"))
         status = await database(request).pool.execute(
             "DELETE FROM pools WHERE pool_id=$1",
             poolid,

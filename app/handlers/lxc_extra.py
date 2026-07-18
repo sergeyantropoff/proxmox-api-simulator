@@ -39,12 +39,8 @@ def register_lxc_extra_handlers(registry: HandlerRegistry) -> None:
         values = _values(inputs)
         resource = await _lxc_resource(request, str(values["node"]), str(values["vmid"]))
         state = _state(resource["state"])
-        ifaces = state.setdefault(
-            "interfaces",
-            [{"name": "eth0", "hwaddr": "02:00:00:00:00:11", "inet": "192.0.2.20/24"}],
-        )
-        await _save_state(request, resource["id"], state)
-        return list(ifaces) if isinstance(ifaces, list) else []
+        ifaces = state.get("interfaces")
+        return [dict(item) for item in ifaces] if isinstance(ifaces, list) else []
 
     async def move_volume(request: Request, inputs: dict[str, Any]) -> str:
         values = _values(inputs)
@@ -70,23 +66,15 @@ def register_lxc_extra_handlers(registry: HandlerRegistry) -> None:
         values = _values(inputs)
         resource = await _lxc_resource(request, str(values["node"]), str(values["vmid"]))
         state = _state(resource["state"])
-        rrd_state = state.setdefault("rrd", {"filename": f"pve-ct-{values['vmid']}.rrd"})
-        await _save_state(request, resource["id"], state)
-        return dict(rrd_state)
+        rrd_state = state.get("rrd")
+        return dict(rrd_state) if isinstance(rrd_state, dict) else {}
 
     async def rrddata(request: Request, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         values = _values(inputs)
         resource = await _lxc_resource(request, str(values["node"]), str(values["vmid"]))
         state = _state(resource["state"])
-        series = state.setdefault(
-            "rrddata",
-            [
-                {"time": 1_700_000_000, "cpu": 0.02, "mem": 64 * 1024 * 1024},
-                {"time": 1_700_000_060, "cpu": 0.03, "mem": 66 * 1024 * 1024},
-            ],
-        )
-        await _save_state(request, resource["id"], state)
-        return list(series)
+        series = state.get("rrddata")
+        return [dict(item) for item in series] if isinstance(series, list) else []
 
     async def _console(request: Request, inputs: dict[str, Any], kind: str) -> dict[str, Any]:
         values = _values(inputs)

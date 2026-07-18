@@ -1,8 +1,10 @@
+**Language / Язык:** [English](troubleshooting-clients.md) | [Русский](../ru/examples/troubleshooting-clients.md)
+
 # Troubleshooting clients
 
 | Symptom | Fix |
 |---|---|
-| TLS certificate errors | Use `:8007` with verify disabled **only** locally, or use HTTP `:8006` |
+| TLS certificate errors | Compose default is `http://localhost:8006` (no TLS). For proxmoxer use `docker compose --profile tls` and `https://localhost:8443` with verify disabled **only** locally (`curl -sk`, `verify_ssl=False`, `insecure=true`). On Kubernetes use your Ingress hostname with cert-manager TLS. |
 | CSRF failure | Send `CSRFPreventionToken` with ticket mutations; prefer token auth in scripts |
 | Node not found | `small` seed uses `pve01` |
 | 403 on power | You may be using `auditor@pve` / readonly token — switch to root or operator |
