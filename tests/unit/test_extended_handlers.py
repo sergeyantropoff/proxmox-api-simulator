@@ -196,5 +196,5 @@ async def test_missing_node_returns_404() -> None:
     pool.node_exists = False
     handler = registry.get("/nodes/{node}/storage", "GET")
     assert handler is not None
-    with pytest.raises(ApiError, match="node does not exist"):
+    with pytest.raises(ApiError, match="No such node"):
         await handler(_request(pool), {"values": {"node": "missing"}})

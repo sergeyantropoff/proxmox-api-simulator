@@ -25,6 +25,45 @@ Workers могут повторять попытки, пока миграции 
 - Мутация без `CSRFPreventionToken` в сессии по тикету.
 - API-токен с неверным форматом (`PVEAPIToken=user@realm!id=secret`).
 - Отказ ACL (сравните `auditor@pve` и `root@pam`).
+- В Web UI при HTTP 401 локальная сессия сбрасывается, в шапке снова **Guest**;
+  войдите заново через Environment.
+
+## Ingress отдаёт брендированный HTML 404 / nginx 405 вместо JSON
+
+Симулятор отвечает на ошибки API JSON (`data` / `message` / `errors`). Если
+видите HTML «страница не найдена» или страницу nginx **405**, тело ответа
+подменил **Ingress / reverse proxy** (часто `custom-http-errors` у
+ingress-nginx).
+
+На Ingress этого хоста (см.
+`helm/proxmox-api-simulator/values-ingress-example.yaml`):
+
+```yaml
+annotations:
+  nginx.ingress.kubernetes.io/proxy-intercept-errors: "false"
+  nginx.ingress.kubernetes.io/custom-http-errors: "502,503"
+```
+
+Проверьте с `Accept: application/json`. Несуществующий узел должен выглядеть так:
+
+```json
+{"data": null, "message": "No such node ('pve01')", "errors": {"node": "No such node ('pve01')"}}
+```
+
+Имена узлов в seed: профиль `small` → `pve01`; `medium` / `ha-demo` → `pve1`…
+
+### Корректный аутентифицированный POST (как у Proxmox)
+
+Тело form-urlencoded, cookie тикета и CSRF-заголовок (не «голый» JSON POST):
+
+```bash
+# после POST /api2/json/access/ticket → ticket + CSRFPreventionToken
+curl -sk -X POST "https://HOST/api2/json/nodes/pve01/ceph/osd" \
+  -H "CSRFPreventionToken: $CSRF" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -b "PVEAuthCookie=$TICKET" \
+  --data-urlencode "dev=/dev/sdb"
+```
 
 ## Задача никогда не завершается
 

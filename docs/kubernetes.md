@@ -60,6 +60,9 @@ What this does:
 6. Creates an Ingress with
    `cert-manager.io/cluster-issuer: letsencrypt-prod` and a TLS secret
    `proxmox-api-simulator-tls`.
+7. Sets Ingress annotations so nginx does not replace API JSON 404/405 with
+   branded HTML error pages (`proxy-intercept-errors: false`, narrow
+   `custom-http-errors`). See [Troubleshooting](troubleshooting.md#ingress-returns-branded-html-404--nginx-405-instead-of-json).
 
 DNS for `pve-sim.example.com` must point at your Ingress controller. Then:
 
