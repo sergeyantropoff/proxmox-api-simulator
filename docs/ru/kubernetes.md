@@ -62,6 +62,9 @@ helm upgrade --install pve-sim ./helm/proxmox-api-simulator \
 6. Создаёт Ingress с
    `cert-manager.io/cluster-issuer: letsencrypt-prod` и TLS secret
    `proxmox-api-simulator-tls`.
+7. Ставит annotations Ingress, чтобы nginx не подменял JSON 404/405
+   брендированными HTML-страницами (`proxy-intercept-errors: false`, узкий
+   `custom-http-errors`). См. [Устранение неполадок](troubleshooting.md#ingress-отдаёт-брендированный-html-404--nginx-405-вместо-json).
 
 DNS для `pve-sim.example.com` должен указывать на ваш Ingress controller. Затем:
 

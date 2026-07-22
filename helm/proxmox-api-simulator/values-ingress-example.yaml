@@ -37,6 +37,13 @@ seed:
 ingress:
   enabled: true
   className: nginx
+  # Keep API JSON bodies (404/405/401). Cluster-wide custom-http-errors HTML
+  # pages must not rewrite simulator error responses.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-intercept-errors: "false"
+    # If the controller still injects branded HTML for 404/405, narrow or clear
+    # custom-http-errors on this Ingress (overrides controller defaults):
+    nginx.ingress.kubernetes.io/custom-http-errors: "502,503"
   hosts:
     - host: pve-sim.example.com
       paths:

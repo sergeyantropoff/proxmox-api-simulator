@@ -4822,6 +4822,7 @@
         state.ticket = null;
         state.csrf = null;
         state.username = null;
+        document.cookie = "PVEAuthCookie=; Max-Age=0; path=/; SameSite=Strict";
         localStorage.removeItem(LS_AUTH);
         setAuth(false);
       }
@@ -6019,16 +6020,29 @@
       }
     }
 
-    function logout() {
+    function clearSession(options = {}) {
+      const { toastMessage = null, toastKind = "info", closePanel = true } = options;
       state.ticket = null;
       state.csrf = null;
       state.username = null;
       document.cookie = "PVEAuthCookie=; Max-Age=0; path=/; SameSite=Strict";
       setAuth(false);
       persistAuth();
-      closeAuthPanel();
+      if (closePanel) closeAuthPanel();
       resetClusterStats("—");
-      toast("Signed out", "info");
+      if (toastMessage) toast(toastMessage, toastKind);
+    }
+
+    function logout() {
+      clearSession({ toastMessage: "Signed out", toastKind: "info" });
+    }
+
+    function expireSession() {
+      clearSession({
+        toastMessage: "Session expired — sign in again",
+        toastKind: "warn",
+        closePanel: false,
+      });
     }
 
     function updateStatusBadge(status) {
@@ -6101,6 +6115,9 @@
       const text = await res.text();
       let parsed;
       try { parsed = JSON.parse(text); } catch { parsed = text; }
+      if (res.status === 401 && (state.ticket || state.username)) {
+        expireSession();
+      }
       return { status: res.status, body: parsed, durationMs: Math.round(performance.now() - started) };
     }
 

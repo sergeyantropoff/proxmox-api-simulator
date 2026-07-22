@@ -25,6 +25,45 @@ Declared methods on majors **6–9** should have handlers. If you see 501:
 - Mutation missing `CSRFPreventionToken` on a ticket session.
 - API token malformed (`PVEAPIToken=user@realm!id=secret`).
 - ACL denial (try `auditor@pve` vs `root@pam` to compare).
+- In the Web UI, HTTP 401 clears the local session and shows **Guest** in the
+  header; sign in again from Environment.
+
+## Ingress returns branded HTML 404 / nginx 405 instead of JSON
+
+The simulator answers API errors as JSON (`data` / `message` / `errors`). If
+you see a site HTML “page not found” or plain nginx **405** page, the
+**Ingress / reverse proxy** replaced the upstream body (often via
+`custom-http-errors` on the ingress-nginx controller).
+
+Fix on the Ingress for this host (see
+`helm/proxmox-api-simulator/values-ingress-example.yaml`):
+
+```yaml
+annotations:
+  nginx.ingress.kubernetes.io/proxy-intercept-errors: "false"
+  nginx.ingress.kubernetes.io/custom-http-errors: "502,503"
+```
+
+Then re-check with `Accept: application/json`. A missing node should look like:
+
+```json
+{"data": null, "message": "No such node ('pve01')", "errors": {"node": "No such node ('pve01')"}}
+```
+
+Seeded node names: profile `small` → `pve01`; `medium` / `ha-demo` → `pve1`…
+
+### Correct authenticated POST (Proxmox-style)
+
+Use form-urlencoded body, ticket cookie, and CSRF header (not bare JSON POST):
+
+```bash
+# after POST /api2/json/access/ticket → ticket + CSRFPreventionToken
+curl -sk -X POST "https://HOST/api2/json/nodes/pve01/ceph/osd" \
+  -H "CSRFPreventionToken: $CSRF" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -b "PVEAuthCookie=$TICKET" \
+  --data-urlencode "dev=/dev/sdb"
+```
 
 ## Task never finishes
 

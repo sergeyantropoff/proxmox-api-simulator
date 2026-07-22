@@ -76,7 +76,11 @@ async def require_node(request: Request, node: str) -> None:
         node,
     )
     if not exists:
-        raise ApiError(404, "node does not exist")
+        raise ApiError(
+            404,
+            f"No such node ('{node}')",
+            errors={"node": f"No such node ('{node}')"},
+        )
 
 
 async def cluster_metadata(request: Request) -> dict[str, Any]:
@@ -105,7 +109,11 @@ async def node_metadata(request: Request, node: str) -> dict[str, Any]:
         node,
     )
     if row is None:
-        raise ApiError(404, "node does not exist")
+        raise ApiError(
+            404,
+            f"No such node ('{node}')",
+            errors={"node": f"No such node ('{node}')"},
+        )
     return state(row["metadata"])
 
 
@@ -116,7 +124,11 @@ async def save_node_metadata(request: Request, node: str, metadata: dict[str, An
         json.dumps(metadata, sort_keys=True),
     )
     if status != "UPDATE 1":
-        raise ApiError(404, "node does not exist")
+        raise ApiError(
+            404,
+            f"No such node ('{node}')",
+            errors={"node": f"No such node ('{node}')"},
+        )
 
 
 def storage_payload(row: Any) -> dict[str, Any]:
