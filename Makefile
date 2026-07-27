@@ -4,19 +4,22 @@ SERVICE_SIM := simulator
 PYTEST_OFFLINE := -m "not integration and not compatibility"
 
 # Docker Hub release image (runtime target only — not the local bind-mount "dev" image).
+# SemVer source of truth: VERSION (synced to pyproject + Helm via bump targets).
 DOCKERHUB_USER ?= inecs
 IMAGE_NAME ?= proxmox-api-simulator
-VERSION ?= $(shell sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo 0.1.0)
 DOCKER_IMAGE ?= $(DOCKERHUB_USER)/$(IMAGE_NAME)
 PUSH_LATEST ?= 1
 
 COMPOSE_RELEASE ?= $(COMPOSE) -f docker-compose.release.yml
 HELM_CHART ?= ./helm/proxmox-api-simulator
 
-.PHONY: help install format lint typecheck test test-unit test-integration test-contract test-compatibility test-surface evidence coverage run dev up up-local down down-local restart logs docker-build docker-up docker-down docker-logs docker-restart db-up db-down db-migrate db-reset api-import api-diff seed clean ci ci-all shell release release-build release-up release-down release-seed helm-deps helm-template helm-lint pulumi-tests push
+.PHONY: help install format lint typecheck test test-unit test-integration test-contract test-compatibility test-surface evidence coverage run dev up up-local down down-local restart logs docker-build docker-up docker-down docker-logs docker-restart db-up db-down db-migrate db-reset api-import api-diff seed clean ci ci-all shell release release-build release-up release-down release-seed helm-deps helm-template helm-lint pulumi-tests push bump-patch bump-minor version-commit
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo
+	@echo "Version: $$(cat VERSION 2>/dev/null || echo 0.1.0)  (make bump-patch | bump-minor)"
 
 install: ## Build runtime and development images
 	@test -f .env || cp .env.example .env
@@ -213,16 +216,34 @@ pulumi-tests: ## Full Pulumi suite (surface majors 6–9 + lifecycle, HTML repor
 	$(MAKE) -C pulumi-tests up
 	$(MAKE) -C pulumi-tests test
 
-push: ## git add ., prompt for commit message, push origin (GitHub + antropoff.ru)
+bump-patch: ## VERSION +0.0.1 (pyproject + Helm)
+	@PYTHONPATH=. python3 scripts/bump_version.py patch
+	@echo "VERSION → $$(cat VERSION)"
+
+bump-minor: ## VERSION +0.1.0 (pyproject + Helm)
+	@PYTHONPATH=. python3 scripts/bump_version.py minor
+	@echo "VERSION → $$(cat VERSION)"
+
+version-commit: ## Stage version files and commit "Bump version to …"
+	@git add VERSION pyproject.toml helm/proxmox-api-simulator/Chart.yaml helm/proxmox-api-simulator/values.yaml
+	@if git diff --cached --quiet; then \
+		echo "Nothing to commit for version files."; \
+	else \
+		git commit -m "Bump version to $$(cat VERSION)."; \
+	fi
+
+push: ## bump-patch + commit version + push origin (GitHub + antropoff.ru)
+	@$(MAKE) bump-patch
+	@$(MAKE) version-commit
 	@set -e; \
 	git add .; \
 	echo "=== staged ==="; \
 	git status --short; \
 	echo; \
 	if git diff --cached --quiet; then \
-		echo "Nothing to commit — pushing current branch."; \
+		echo "Nothing else to commit — pushing current branch."; \
 	else \
-		echo "Enter commit message, then Ctrl-D:"; \
+		echo "Enter commit message for remaining changes, then Ctrl-D:"; \
 		msg=$$(cat </dev/tty); \
 		if [ -z "$$msg" ]; then echo "Empty commit message, aborting." >&2; exit 1; fi; \
 		git commit -m "$$msg"; \

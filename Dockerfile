@@ -27,6 +27,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
 RUN groupadd --system --gid 10001 simulator \
     && useradd --system --uid 10001 --gid simulator --home-dir /app --no-create-home simulator
 COPY --from=builder /opt/venv /opt/venv
+COPY VERSION /app/VERSION
 COPY contracts/e61a893e996d05d376579226e7dfbedbcfce8b71787adacffbc557e6e35901c1/snapshot.json /app/contracts/pve-9.2.3.json
 COPY evidence/ /app/evidence/
 WORKDIR /app

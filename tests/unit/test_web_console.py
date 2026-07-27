@@ -111,7 +111,10 @@ async def test_ui_versions_and_catalog_endpoints() -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             versions = await client.get("/ui/api/versions")
             assert versions.status_code == 200
-            assert {item["major"] for item in versions.json()["majors"]} == {6, 7, 8, 9}
+            body = versions.json()
+            assert {item["major"] for item in body["majors"]} == {6, 7, 8, 9}
+            assert body["app_version"]
+            assert body["app_version"].count(".") == 2
             catalog = await client.get("/ui/api/catalog", params={"major": 9})
             assert catalog.status_code == 200
             assert catalog.json()["source_version"] == "9.2.3"

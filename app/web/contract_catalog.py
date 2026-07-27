@@ -102,8 +102,10 @@ def list_majors(
     *,
     runtime_version: str | None,
     settings: Settings | None = None,
+    app_version: str | None = None,
 ) -> dict[str, object]:
     return {
+        "app_version": app_version,
         "runtime_version": runtime_version,
         "majors": [
             {

@@ -2,8 +2,8 @@ apiVersion: v2
 name: proxmox-api-simulator
 description: Stateful Proxmox VE API simulator (PostgreSQL-backed) for labs and CI
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.1
+appVersion: "0.1.1"
 home: https://github.com/sergeyantropoff/proxmox-api-simulator
 keywords:
   - proxmox

@@ -16,6 +16,7 @@ from app.contracts.source import SourceError
 from app.db.pool import AsyncpgDatabase
 from app.dependencies import get_database
 from app.simulation.seed import apply_seed, build_profile, simulation_state_summary
+from app.version import get_app_version
 from app.web.assets import console_html
 from app.web.compatibility_catalog import compatibility_payload
 from app.web.contract_catalog import catalog_payload, list_majors, load_snapshot, method_payload
@@ -37,7 +38,13 @@ async def console() -> HTMLResponse:
 async def ui_versions(request: Request) -> JSONResponse:
     settings = _settings(request)
     runtime_version = _runtime_version(request)
-    return JSONResponse(list_majors(runtime_version=runtime_version, settings=settings))
+    return JSONResponse(
+        list_majors(
+            runtime_version=runtime_version,
+            settings=settings,
+            app_version=get_app_version(),
+        )
+    )
 
 
 @router.get("/ui/api/catalog", include_in_schema=False)

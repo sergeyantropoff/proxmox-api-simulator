@@ -25,6 +25,7 @@ from app.tasks.lxc import lxc_handler
 from app.tasks.qemu import qemu_handler
 from app.tasks.repository import TaskRepository
 from app.tasks.worker import TaskWorker
+from app.version import get_app_version
 from app.web.routes import router as web_router
 
 
@@ -117,7 +118,7 @@ def create_app(
         resolved_workers = (task_worker,)
     app = FastAPI(
         title=resolved.app_name,
-        version="0.1.0",
+        version=get_app_version(),
         openapi_tags=openapi_tag_metadata(),
         lifespan=create_lifespan(resolved, database_factory, resolved_workers or ()),
     )

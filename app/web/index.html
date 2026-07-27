@@ -796,6 +796,10 @@
     }
 
     .help-about-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.45rem 0.65rem;
       margin: 0;
       padding: 0 14px 12px;
       font-size: 11px;
@@ -807,6 +811,21 @@
       font-family: var(--mono);
       font-size: 11px;
       color: var(--text);
+    }
+
+    .help-about-version {
+      flex-shrink: 0;
+      padding: 0.22rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      color: var(--accent);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      line-height: 1;
+      white-space: nowrap;
     }
 
     .help-panel {
@@ -3932,6 +3951,7 @@
       major: 9,
       majors: [],
       runtimeVersion: null,
+      appVersion: null,
       catalog: null,
       method: null,
       pathValues: {},
@@ -5797,6 +5817,7 @@
     function buildAboutHtml() {
       const version = state.runtimeVersion || "—";
       const catalogMajor = state.major || "—";
+      const appVersion = state.appVersion ? `v${state.appVersion}` : "v—";
       return `
         <div class="help-about-panel">
           <div class="help-report-head">
@@ -5806,7 +5827,10 @@
               automation, and infrastructure tooling without a real hypervisor cluster.
             </p>
             <p class="help-about-meta">
-              Runtime <code>${escapeHtml(version)}</code> · catalog PVE <code>${escapeHtml(String(catalogMajor))}</code>
+              <span class="help-about-version" title="Simulator package version">${escapeHtml(appVersion)}</span>
+              <span>
+                Runtime <code>${escapeHtml(version)}</code> · catalog PVE <code>${escapeHtml(String(catalogMajor))}</code>
+              </span>
             </p>
           </div>
           <div class="help-report-head">
@@ -6905,6 +6929,7 @@
     async function loadVersions() {
       const p = await fetch("/ui/api/versions").then((r) => r.json());
       state.runtimeVersion = p.runtime_version;
+      state.appVersion = p.app_version || null;
       state.majors = p.majors || [];
       setText(els.statRuntime, p.runtime_version || "—");
       const storedMajor = readStoredMajor();

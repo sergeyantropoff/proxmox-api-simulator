@@ -19,6 +19,7 @@ page. Russian mirrors live under [`ru/`](ru/README.md).
 | [Domains](domains/README.md) | QEMU, LXC, storage, HA, SDN, … |
 | [Web UI](web-ui.md) | Interactive console and catalogs |
 | [Operations](operations.md) | Migrate, reseed, upgrade, Hub publish |
+| [CI/CD (Jenkins)](ci-cd.md) | VERSION, Harbor/Hub push, deploy to proxmox.devops.org.ru |
 | [Docker Hub overview](docker-hub-overview.md) | Paste-ready Hub repository description |
 | [Kubernetes / Helm](kubernetes.md) | Hub image + Ingress + Let's Encrypt |
 | [Security](security.md) | Lab threat model and credentials |

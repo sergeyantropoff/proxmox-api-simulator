@@ -37,11 +37,12 @@ def _snapshot() -> Snapshot:
 
 
 def test_list_majors_includes_latest_releases() -> None:
-    payload = list_majors(runtime_version="9.2.3")
+    payload = list_majors(runtime_version="9.2.3", app_version="0.1.0")
     majors_list = cast(list[dict[str, Any]], payload["majors"])
     majors = {item["major"] for item in majors_list}
     assert majors == {6, 7, 8, 9}
     assert payload["runtime_version"] == "9.2.3"
+    assert payload["app_version"] == "0.1.0"
 
 
 def test_list_majors_includes_artifact_urls() -> None:

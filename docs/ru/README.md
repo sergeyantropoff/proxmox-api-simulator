@@ -19,6 +19,7 @@
 | [Домены](domains/README.md) | QEMU, LXC, storage, HA, SDN, … |
 | [Web UI](web-ui.md) | Интерактивная консоль и каталоги |
 | [Эксплуатация](operations.md) | Миграция, reseed, обновление, публикация в Hub |
+| [CI/CD (Jenkins)](ci-cd.md) | VERSION, push Harbor/Hub, деплой на proxmox.devops.org.ru |
 | [Обзор Docker Hub](../docker-hub-overview.md) | Готовый текст описания репозитория Hub (EN) |
 | [Kubernetes / Helm](kubernetes.md) | Образ Hub + Ingress + Let's Encrypt |
 | [Безопасность](security.md) | Модель угроз лаборатории и учётные данные |

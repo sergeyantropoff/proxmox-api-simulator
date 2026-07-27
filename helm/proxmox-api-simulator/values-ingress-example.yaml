@@ -9,8 +9,8 @@
 #     -n proxmox-sim --create-namespace \
 #     -f helm/proxmox-api-simulator/values-ingress-example.yaml \
 #     --set certManager.email=you@example.com \
-#     --set ingress.hosts[0].host=pve-sim.example.com \
-#     --set ingress.tls[0].hosts[0]=pve-sim.example.com \
+#     --set 'ingress.hosts[0].host=proxmox.devops.org.ru' \
+#     --set 'ingress.tls[0].hosts[0]=proxmox.devops.org.ru' \
 #     --set secret.ticketSigningKey="$(openssl rand -hex 32)" \
 #     --set postgresql.auth.password="$(openssl rand -hex 16)"
 
@@ -45,14 +45,14 @@ ingress:
     # custom-http-errors on this Ingress (overrides controller defaults):
     nginx.ingress.kubernetes.io/custom-http-errors: "502,503"
   hosts:
-    - host: pve-sim.example.com
+    - host: proxmox.devops.org.ru
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: proxmox-api-simulator-tls
       hosts:
-        - pve-sim.example.com
+        - proxmox.devops.org.ru
 
 certManager:
   enabled: true

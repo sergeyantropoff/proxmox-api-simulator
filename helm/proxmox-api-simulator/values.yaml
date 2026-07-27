@@ -10,8 +10,8 @@ replicaCount: 1
 image:
   repository: inecs/proxmox-api-simulator
   pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
-  tag: ""
+  # Synced from VERSION via make bump-patch / scripts/bump_version.py
+  tag: "0.1.1"
 
 imagePullSecrets: []
 nameOverride: ""
