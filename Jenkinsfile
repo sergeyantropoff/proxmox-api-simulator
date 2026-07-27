@@ -146,15 +146,19 @@ pipeline {
                                     echo "Rolling ${DOCKERHUB_IMAGE}:${IMAGE_VERSION} → ${HELM_NAMESPACE}/${DEPLOYMENT_NAME}"
                                     echo "Public URL: https://${INGRESS_HOST}/"
 
-                                    # One set-image avoids double ReplicaSet churn; migrate when present.
-                                    SET_ARGS=("simulator=${DOCKERHUB_IMAGE}:${IMAGE_VERSION}")
-                                    if kubectl -n "$HELM_NAMESPACE" get deploy "$DEPLOYMENT_NAME" \
-                                         -o jsonpath='{.spec.template.spec.initContainers[*].name}' \
-                                         | tr ' ' '\n' | grep -qx migrate; then
-                                      SET_ARGS+=("migrate=${DOCKERHUB_IMAGE}:${IMAGE_VERSION}")
+                                    # POSIX sh (Alpine ash): no bash arrays. One set-image when migrate exists.
+                                    INITS="$(kubectl -n "$HELM_NAMESPACE" get deploy "$DEPLOYMENT_NAME" \
+                                      -o jsonpath='{.spec.template.spec.initContainers[*].name}' || true)"
+                                    if printf '%s\n' $INITS | grep -qx migrate; then
+                                      kubectl -n "$HELM_NAMESPACE" set image \
+                                        "deployment/${DEPLOYMENT_NAME}" \
+                                        "simulator=${DOCKERHUB_IMAGE}:${IMAGE_VERSION}" \
+                                        "migrate=${DOCKERHUB_IMAGE}:${IMAGE_VERSION}"
+                                    else
+                                      kubectl -n "$HELM_NAMESPACE" set image \
+                                        "deployment/${DEPLOYMENT_NAME}" \
+                                        "simulator=${DOCKERHUB_IMAGE}:${IMAGE_VERSION}"
                                     fi
-                                    kubectl -n "$HELM_NAMESPACE" set image \
-                                      "deployment/${DEPLOYMENT_NAME}" "${SET_ARGS[@]}"
 
                                     kubectl -n "$HELM_NAMESPACE" rollout status \
                                       "deployment/${DEPLOYMENT_NAME}" --timeout=1200s
