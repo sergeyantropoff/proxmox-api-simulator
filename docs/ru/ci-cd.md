@@ -15,7 +15,8 @@ Jenkins версию **не** поднимает — собирает то, чт
 1. **Build & push** (agent `docker` / DinD) — multi-arch `linux/amd64,linux/arm64`
    в Harbor и Docker Hub, теги только **`:{VERSION}`** и **`:latest`**.
 2. **Deploy** — `kubectl set image` для `simulators/simulators-proxmox`
-   (контейнер `simulator` + initContainer `migrate`), затем rollout status.
+   (контейнер `simulator` + initContainer `migrate`), затем rollout status
+   (`--timeout=1200s`).
 
 Первый install в кластере (Ingress, Postgres, секреты) — **не** этот job, а
 `make addon-simulators` в DevOpsTools/K3S (`simulators_proxmox_host:

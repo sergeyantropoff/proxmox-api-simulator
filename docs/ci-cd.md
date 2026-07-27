@@ -15,7 +15,8 @@ Single [`Jenkinsfile`](../Jenkinsfile) on `main` / `master`:
 1. **Build & push** (agent `docker` / DinD) — multi-arch `linux/amd64,linux/arm64`
    to Harbor and Docker Hub with tags **`:{VERSION}`** and **`:latest`** only.
 2. **Deploy** — `kubectl set image` on `simulators/simulators-proxmox` (main
-   container `simulator` + initContainer `migrate`), then rollout status.
+   container `simulator` + initContainer `migrate`), then rollout status
+   (`--timeout=1200s`).
 
 First cluster install (Ingress, Postgres, secrets) is **not** this job — use
 `make addon-simulators` in DevOpsTools/K3S (`simulators_proxmox_host:
